@@ -1,0 +1,30 @@
+services:
+  cliproxyapi:
+    image: ${CLI_PROXY_IMAGE:?CLI_PROXY_IMAGE is required}
+    container_name: cliproxyapi
+    restart: unless-stopped
+    mem_limit: 6g
+    memswap_limit: 6g
+    cpus: 4
+    pids_limit: 512
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: "5"
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - /opt/cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml
+      - /opt/cliproxyapi/auth:/root/.cli-proxy-api
+      - /opt/cliproxyapi/logs:/CLIProxyAPI/logs
+      - /opt/cliproxyapi/plugins:/CLIProxyAPI/plugins
+      - /opt/cliproxyapi/state/cpa-key-policy-state.json:/CLIProxyAPI/cpa-key-policy-state.json
+    networks:
+      - new-api-network
+
+networks:
+  new-api-network:
+    external: true
