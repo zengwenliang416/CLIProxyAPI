@@ -74,6 +74,23 @@ type FileStreamingLogWriter struct {
 	apiResponseTimestamp time.Time
 }
 
+// WriteRequestBodySource copies a file-backed request body into the streaming
+// log's request-body spool without materializing it in memory.
+func (w *FileStreamingLogWriter) WriteRequestBodySource(source *FileBodySource) error {
+	if w == nil || source == nil || !source.HasPayload() || w.requestBodyPath == "" {
+		return nil
+	}
+	requestBodyFile, errOpen := os.OpenFile(w.requestBodyPath, os.O_WRONLY|os.O_TRUNC, 0)
+	if errOpen != nil {
+		return errOpen
+	}
+	errWrite := source.WriteTo(requestBodyFile)
+	if errClose := requestBodyFile.Close(); errClose != nil && errWrite == nil {
+		errWrite = errClose
+	}
+	return errWrite
+}
+
 // WriteChunkAsync writes a response chunk asynchronously (non-blocking).
 //
 // Parameters:

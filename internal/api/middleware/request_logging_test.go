@@ -86,30 +86,21 @@ func TestShouldSkipMethodForRequestLogging(t *testing.T) {
 
 func TestShouldCaptureRequestBody(t *testing.T) {
 	tests := []struct {
-		name          string
-		loggerEnabled bool
-		req           *http.Request
-		want          bool
+		name string
+		req  *http.Request
+		want bool
 	}{
 		{
-			name:          "logger enabled always captures",
-			loggerEnabled: true,
+			name: "unknown size",
 			req: &http.Request{
 				Body:          io.NopCloser(strings.NewReader("{}")),
 				ContentLength: -1,
 				Header:        http.Header{"Content-Type": []string{"application/json"}},
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name:          "nil request",
-			loggerEnabled: false,
-			req:           nil,
-			want:          false,
-		},
-		{
-			name:          "small known size json in error-only mode",
-			loggerEnabled: false,
+			name: "small known size",
 			req: &http.Request{
 				Body:          io.NopCloser(strings.NewReader("{}")),
 				ContentLength: 2,
@@ -118,8 +109,7 @@ func TestShouldCaptureRequestBody(t *testing.T) {
 			want: true,
 		},
 		{
-			name:          "large known size skipped in error-only mode",
-			loggerEnabled: false,
+			name: "large known size",
 			req: &http.Request{
 				Body:          io.NopCloser(strings.NewReader("x")),
 				ContentLength: maxErrorOnlyCapturedRequestBodyBytes + 1,
@@ -128,18 +118,12 @@ func TestShouldCaptureRequestBody(t *testing.T) {
 			want: false,
 		},
 		{
-			name:          "unknown size skipped in error-only mode",
-			loggerEnabled: false,
-			req: &http.Request{
-				Body:          io.NopCloser(strings.NewReader("x")),
-				ContentLength: -1,
-				Header:        http.Header{"Content-Type": []string{"application/json"}},
-			},
+			name: "nil request",
+			req:  nil,
 			want: false,
 		},
 		{
-			name:          "multipart skipped in error-only mode",
-			loggerEnabled: false,
+			name: "multipart skipped",
 			req: &http.Request{
 				Body:          io.NopCloser(strings.NewReader("x")),
 				ContentLength: 1,
@@ -150,7 +134,7 @@ func TestShouldCaptureRequestBody(t *testing.T) {
 	}
 
 	for i := range tests {
-		got := shouldCaptureRequestBody(tests[i].loggerEnabled, tests[i].req)
+		got := shouldCaptureRequestBody(tests[i].req)
 		if got != tests[i].want {
 			t.Fatalf("%s: got %t, want %t", tests[i].name, got, tests[i].want)
 		}
@@ -165,7 +149,7 @@ func TestDeferredRequestBodyCaptureDoesNotDrainUnreadBody(t *testing.T) {
 	request.ContentLength = -1
 	request.Header.Set("Content-Type", "application/json")
 	requestInfo := &RequestInfo{Headers: map[string][]string{"Content-Type": {"application/json"}}}
-	capture := attachDeferredRequestBodyCapture(request, logger, requestInfo, false, false)
+	capture := attachDeferredRequestBodyCapture(request, logger, requestInfo, false)
 	if capture == nil {
 		t.Fatal("deferred request body capture was not attached")
 	}
@@ -260,6 +244,54 @@ func TestRequestLoggingMiddlewareCapturesLargeErrorRequestAndDeferredAPIRequest(
 	if !bytes.Contains(content, upstreamBody) {
 		t.Fatal("error log does not contain the deferred upstream request body")
 	}
+}
+
+func TestRequestLoggingMiddlewareSpoolsLargeStreamingRequestWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	logsDir := t.TempDir()
+	logger := logging.NewFileRequestLogger(true, logsDir, "", 10)
+	payload := append([]byte(`{"marker":"large-stream-body","padding":"`), bytes.Repeat([]byte("x"), int(maxErrorOnlyCapturedRequestBodyBytes))...)
+	payload = append(payload, []byte(`"}`)...)
+
+	router := gin.New()
+	router.Use(RequestLoggingMiddleware(logger))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		body, errRead := io.ReadAll(c.Request.Body)
+		if errRead != nil || !bytes.Equal(body, payload) {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Header("Content-Type", "text/event-stream")
+		c.Status(http.StatusOK)
+		_, _ = c.Writer.Write([]byte("data: done\n\n"))
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusOK)
+	}
+	entries, errReadDir := os.ReadDir(logsDir)
+	if errReadDir != nil {
+		t.Fatalf("read logs dir: %v", errReadDir)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".log") {
+			continue
+		}
+		content, errReadLog := os.ReadFile(logsDir + string(os.PathSeparator) + entry.Name())
+		if errReadLog != nil {
+			t.Fatalf("read request log: %v", errReadLog)
+		}
+		if bytes.Contains(content, payload) {
+			return
+		}
+	}
+	t.Fatal("streaming request log does not contain the spooled large request body")
 }
 
 func TestAttachRequestLogSourcesUsesLoggerLogsDir(t *testing.T) {

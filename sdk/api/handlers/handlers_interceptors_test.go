@@ -612,6 +612,50 @@ func TestHandlerSkipsDisabledRequestInterceptorsWithoutCopyingPayload(t *testing
 	}
 }
 
+func TestHandlerNoopRequestInterceptorKeepsPayloadStorage(t *testing.T) {
+	payload := []byte(`{"model":"noop-interceptor-model"}`)
+	handler := NewBaseAPIHandlers(&sdkconfig.SDKConfig{}, nil)
+	handler.SetPluginHost(&handlerInterceptorTestHost{})
+
+	req := coreexecutor.Request{Model: "noop-interceptor-model", Payload: payload}
+	opts := coreexecutor.Options{OriginalRequest: payload}
+	gotReq, gotOpts, err := handler.applyRequestInterceptorsBeforeAuth(context.Background(), "openai", req.Model, "test-req", req, opts, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if &gotReq.Payload[0] != &payload[0] {
+		t.Fatal("no-op request interceptor copied request payload")
+	}
+	if &gotOpts.OriginalRequest[0] != &payload[0] {
+		t.Fatal("no-op request interceptor copied original request")
+	}
+}
+
+func TestRequestAfterAuthCaptureKeepsPayloadStorageWithoutRewrite(t *testing.T) {
+	payload := []byte(`{"model":"noop-after-auth-model"}`)
+	capture := &requestAfterAuthCapture{}
+	capture.record(coreexecutor.RequestAfterAuthInterceptRequest{
+		Headers: http.Header{"X-Original": []string{"1"}},
+		Body:    payload,
+	}, coreexecutor.RequestAfterAuthInterceptResponse{
+		Headers: http.Header{"X-Plugin": []string{"1"}},
+		Body:    cloneBytes(payload),
+	})
+
+	req := coreexecutor.Request{Payload: payload}
+	opts := coreexecutor.Options{OriginalRequest: payload}
+	gotReq, gotOpts := capture.apply(req, opts)
+	if &gotReq.Payload[0] != &payload[0] {
+		t.Fatal("no-op after-auth interceptor copied request payload")
+	}
+	if &gotOpts.OriginalRequest[0] != &payload[0] {
+		t.Fatal("no-op after-auth interceptor copied original request")
+	}
+	if gotOpts.Headers.Get("X-Plugin") != "1" {
+		t.Fatalf("headers = %#v, want plugin update", gotOpts.Headers)
+	}
+}
+
 func BenchmarkHandlerRequestInterceptors(b *testing.B) {
 	sizes := []struct {
 		name  string

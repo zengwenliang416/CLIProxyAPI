@@ -1360,6 +1360,68 @@ func TestInterceptRequestAfterAuthPassesTargetFormat(t *testing.T) {
 	}
 }
 
+func TestInterceptorEchoBodiesDoNotReportReplacements(t *testing.T) {
+	host := newHostWithRecords(capabilityRecord{
+		id: "echo",
+		plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{
+			RequestInterceptor: requestInterceptorFunc(func(ctx context.Context, req pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
+				return pluginapi.RequestInterceptResponse{Body: req.Body}, nil
+			}),
+			ResponseInterceptor: responseInterceptorFunc{
+				interceptResponse: func(ctx context.Context, req pluginapi.ResponseInterceptRequest) (pluginapi.ResponseInterceptResponse, error) {
+					return pluginapi.ResponseInterceptResponse{Body: req.Body}, nil
+				},
+			},
+			StreamChunkInterceptor: responseInterceptorFunc{
+				interceptStreamChunk: func(ctx context.Context, req pluginapi.StreamChunkInterceptRequest) (pluginapi.StreamChunkInterceptResponse, error) {
+					return pluginapi.StreamChunkInterceptResponse{Body: req.Body}, nil
+				},
+			},
+		}},
+	})
+
+	if got := host.InterceptRequestBeforeAuth(context.Background(), pluginapi.RequestInterceptRequest{Body: []byte("request")}); len(got.Body) != 0 {
+		t.Fatalf("request body = %q, want no replacement", got.Body)
+	}
+	if got := host.InterceptResponse(context.Background(), pluginapi.ResponseInterceptRequest{Body: []byte("response")}); len(got.Body) != 0 {
+		t.Fatalf("response body = %q, want no replacement", got.Body)
+	}
+	if got := host.InterceptStreamChunk(context.Background(), pluginapi.StreamChunkInterceptRequest{Body: []byte("chunk")}); len(got.Body) != 0 {
+		t.Fatalf("stream body = %q, want no replacement", got.Body)
+	}
+}
+
+func BenchmarkInterceptRequestEchoBody(b *testing.B) {
+	host := newHostWithRecords(capabilityRecord{
+		id: "echo",
+		plugin: pluginapi.Plugin{Capabilities: pluginapi.Capabilities{
+			RequestInterceptor: requestInterceptorFunc(func(ctx context.Context, req pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
+				return pluginapi.RequestInterceptResponse{Body: req.Body}, nil
+			}),
+		}},
+	})
+
+	for _, size := range []struct {
+		name  string
+		bytes int
+	}{
+		{name: "1MiB", bytes: 1 << 20},
+		{name: "8MiB", bytes: 8 << 20},
+	} {
+		payload := make([]byte, size.bytes)
+		b.Run(size.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size.bytes))
+			for range b.N {
+				resp := host.InterceptRequestBeforeAuth(context.Background(), pluginapi.RequestInterceptRequest{Body: payload})
+				if len(resp.Body) != 0 {
+					b.Fatal("echo interceptor reported a body replacement")
+				}
+			}
+		})
+	}
+}
+
 func TestInterceptorsSkipExceptedPlugin(t *testing.T) {
 	originCalls := 0
 	otherCalls := 0

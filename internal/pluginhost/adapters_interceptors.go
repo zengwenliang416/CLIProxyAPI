@@ -109,8 +109,9 @@ func (h *Host) InterceptRequestAfterAuthExcept(ctx context.Context, req pluginap
 func (h *Host) interceptRequest(ctx context.Context, req pluginapi.RequestInterceptRequest, method string, invoke func(pluginapi.RequestInterceptor, context.Context, pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error), skipPluginID string) pluginapi.RequestInterceptResponse {
 	current := pluginapi.RequestInterceptResponse{
 		Headers: cloneHeader(req.Headers),
-		Body:    bytes.Clone(req.Body),
 	}
+	body := req.Body
+	bodyChanged := false
 	skipPluginID = strings.TrimSpace(skipPluginID)
 	for _, record := range h.activeRecords() {
 		interceptor := record.plugin.Capabilities.RequestInterceptor
@@ -119,14 +120,15 @@ func (h *Host) interceptRequest(ctx context.Context, req pluginapi.RequestInterc
 		}
 		nextReq := req
 		nextReq.Headers = cloneHeader(current.Headers)
-		nextReq.Body = bytes.Clone(current.Body)
+		nextReq.Body = bytes.Clone(body)
 		nextReq.Metadata = cloneInterceptorMetadata(req.Metadata)
 		if resp, ok := h.callRequestInterceptor(ctx, record, method, func(callCtx context.Context, callReq pluginapi.RequestInterceptRequest) (pluginapi.RequestInterceptResponse, error) {
 			return invoke(interceptor, callCtx, callReq)
 		}, nextReq); ok {
 			current.Headers = mergeHeaders(current.Headers, resp.Headers, resp.ClearHeaders)
-			if len(resp.Body) > 0 {
-				current.Body = bytes.Clone(resp.Body)
+			if len(resp.Body) > 0 && !bytes.Equal(resp.Body, body) {
+				body = bytes.Clone(resp.Body)
+				bodyChanged = true
 			}
 			if resp.Terminate {
 				current.Terminate = true
@@ -136,6 +138,9 @@ func (h *Host) interceptRequest(ctx context.Context, req pluginapi.RequestInterc
 				break
 			}
 		}
+	}
+	if bodyChanged {
+		current.Body = body
 	}
 	return current
 }
@@ -224,8 +229,9 @@ func (h *Host) InterceptResponse(ctx context.Context, req pluginapi.ResponseInte
 func (h *Host) InterceptResponseExcept(ctx context.Context, req pluginapi.ResponseInterceptRequest, skipPluginID string) pluginapi.ResponseInterceptResponse {
 	current := pluginapi.ResponseInterceptResponse{
 		Headers: cloneHeader(req.ResponseHeaders),
-		Body:    bytes.Clone(req.Body),
 	}
+	body := req.Body
+	bodyChanged := false
 	skipPluginID = strings.TrimSpace(skipPluginID)
 	for _, record := range h.activeRecords() {
 		interceptor := record.plugin.Capabilities.ResponseInterceptor
@@ -237,14 +243,18 @@ func (h *Host) InterceptResponseExcept(ctx context.Context, req pluginapi.Respon
 		nextReq.ResponseHeaders = cloneHeader(current.Headers)
 		nextReq.OriginalRequest = bytes.Clone(req.OriginalRequest)
 		nextReq.RequestBody = bytes.Clone(req.RequestBody)
-		nextReq.Body = bytes.Clone(current.Body)
+		nextReq.Body = bytes.Clone(body)
 		nextReq.Metadata = cloneInterceptorMetadata(req.Metadata)
 		if resp, ok := h.callResponseInterceptor(ctx, record, interceptor, nextReq); ok {
 			current.Headers = mergeHeaders(current.Headers, resp.Headers, resp.ClearHeaders)
-			if len(resp.Body) > 0 {
-				current.Body = bytes.Clone(resp.Body)
+			if len(resp.Body) > 0 && !bytes.Equal(resp.Body, body) {
+				body = bytes.Clone(resp.Body)
+				bodyChanged = true
 			}
 		}
+	}
+	if bodyChanged {
+		current.Body = body
 	}
 	return current
 }
@@ -256,8 +266,9 @@ func (h *Host) InterceptStreamChunk(ctx context.Context, req pluginapi.StreamChu
 func (h *Host) InterceptStreamChunkExcept(ctx context.Context, req pluginapi.StreamChunkInterceptRequest, skipPluginID string) pluginapi.StreamChunkInterceptResponse {
 	current := pluginapi.StreamChunkInterceptResponse{
 		Headers: cloneHeader(req.ResponseHeaders),
-		Body:    bytes.Clone(req.Body),
 	}
+	body := req.Body
+	bodyChanged := false
 	skipPluginID = strings.TrimSpace(skipPluginID)
 	for _, record := range h.activeRecords() {
 		interceptor := record.plugin.Capabilities.StreamChunkInterceptor
@@ -276,20 +287,30 @@ func (h *Host) InterceptStreamChunkExcept(ctx context.Context, req pluginapi.Str
 			nextReq.OriginalRequest = bytes.Clone(req.OriginalRequest)
 			nextReq.RequestBody = bytes.Clone(req.RequestBody)
 		}
-		nextReq.Body = bytes.Clone(current.Body)
+		nextReq.Body = bytes.Clone(body)
 		nextReq.HistoryChunks = cloneByteSlices(req.HistoryChunks)
 		nextReq.Metadata = cloneInterceptorMetadata(req.Metadata)
 		if resp, ok := h.callStreamChunkInterceptor(ctx, record, interceptor, nextReq); ok {
 			current.Headers = mergeHeaders(current.Headers, resp.Headers, resp.ClearHeaders)
-			if len(resp.Body) > 0 {
-				current.Body = bytes.Clone(resp.Body)
+			if len(resp.Body) > 0 && !bytes.Equal(resp.Body, body) {
+				body = bytes.Clone(resp.Body)
+				bodyChanged = true
 			}
 			if resp.DropChunk {
 				current.DropChunk = true
 			}
 		}
 	}
+	if bodyChanged {
+		current.Body = body
+	}
 	return current
+}
+
+// InterceptorInputsAreIsolated reports that the host clones mutable interceptor
+// inputs before invoking each plugin.
+func (h *Host) InterceptorInputsAreIsolated() bool {
+	return h != nil
 }
 
 func (h *Host) HasStreamInterceptors() bool {
