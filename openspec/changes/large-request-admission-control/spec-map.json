@@ -1,0 +1,52 @@
+{
+  "touched_specs": [
+    "ui-design",
+    "system-architecture",
+    "frontend-backend-data-flow",
+    "component-architecture"
+  ],
+  "ui_rules": [],
+  "architecture_modules": [
+    "sdk/api/handlers",
+    "sdk/api/handlers/openai",
+    "internal/config",
+    "internal/api"
+  ],
+  "api_contracts": [
+    "HTTP JSON request bodies",
+    "OpenAI Responses WebSocket messages",
+    "OpenAI image multipart requests",
+    "OpenAI video multipart and URL-encoded requests",
+    "protocol-compatible local capacity errors"
+  ],
+  "database_entities": [],
+  "permissions": [
+    "request admission completes before provider credential selection",
+    "temporary request files never contain provider credentials added by the server"
+  ],
+  "operational_constraints": [
+    "default absolute request limit 83886080 bytes",
+    "default large-request threshold 8388608 bytes",
+    "default waiting large-request limit 16",
+    "default aggregate in-flight request-memory budget 1073741824 bytes",
+    "configuration hot reload updates effective limits",
+    "no timeout after upstream connection establishment"
+  ],
+  "data_flows": [
+    "FLOW-MODEL-HTTP",
+    "FLOW-RESPONSES-WS",
+    "FLOW-MULTIPART-MEDIA",
+    "FLOW-CAPACITY-ADMISSION"
+  ],
+  "theme_modes": [
+    "theme-toggle:none",
+    "theme:none"
+  ],
+  "locale_policy": [
+    "i18n:disabled",
+    "locales:none",
+    "default-locale:none"
+  ],
+  "unresolved_gaps": [
+  ]
+}

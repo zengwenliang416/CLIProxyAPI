@@ -1,0 +1,10 @@
+{
+  "status": "approved",
+  "prototype_code": "required_present",
+  "prototype_type": "api-contract",
+  "approved_variant": "bounded-large-request-errors-v1",
+  "promotion": "requires_development_gate",
+  "blocked_reasons": [],
+  "user_decision": "可以 就按照现在的想法来修改吧",
+  "recorded_at": "2026-08-31T11:30:00+08:00"
+}
