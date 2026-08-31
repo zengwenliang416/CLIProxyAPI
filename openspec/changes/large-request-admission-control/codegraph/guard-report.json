@@ -1,0 +1,97 @@
+{
+  "schema": "specnav.codegraph.guard_report.v1",
+  "generated_at": "2026-08-31T03:30:37.782Z",
+  "active_change": "large-request-admission-control",
+  "stage": "development",
+  "ok": true,
+  "status": {
+    "policy": {
+      "enabled": true,
+      "profile": "bootstrap",
+      "mode": "observe",
+      "stage": "development",
+      "required_for_stage": false,
+      "disabled_reason": null
+    },
+    "execution_surface": "cli",
+    "cli": {
+      "available": true,
+      "version": "1.3.1",
+      "path": "/Users/wenliang_zeng/.local/bin/codegraph",
+      "unsupported": false,
+      "error": null
+    },
+    "mcp": {
+      "configured": true,
+      "visible_in_current_session": false,
+      "restart_required": true,
+      "config_files": [
+        "/Users/wenliang_zeng/.claude.json",
+        "/Users/wenliang_zeng/.codex/config.toml"
+      ]
+    },
+    "index": {
+      "initialized": false,
+      "projectPath": "/Users/wenliang_zeng/Documents/Codex/2026-08-30/kan-k/work/CLIProxyAPI",
+      "indexPath": null,
+      "lastIndexed": null,
+      "fileCount": 0,
+      "nodeCount": 0,
+      "edgeCount": 0,
+      "pendingChanges": {
+        "added": 0,
+        "modified": 0,
+        "removed": 0
+      },
+      "reindexRecommended": false,
+      "worktreeMismatch": null
+    }
+  },
+  "decision": {
+    "schema": "specnav.codegraph.decision.v1",
+    "stage": "development",
+    "profile": "bootstrap",
+    "effective_mode": "observe",
+    "required_for_stage": false,
+    "execution_surface": "cli",
+    "result": "warn",
+    "blockers": [],
+    "warnings": [
+      "codegraph:not-indexed"
+    ],
+    "explanation": "CodeGraph policy has advisory warnings for development."
+  },
+  "evidence_index": {
+    "schema": "specnav.codegraph.evidence_index.v1",
+    "generated_at": "2026-08-31T03:30:37.781Z",
+    "active_change": "large-request-admission-control",
+    "source_raw": "openspec/changes/large-request-admission-control/codegraph/evidence.jsonl",
+    "by_claim": {},
+    "by_stage": {},
+    "blockers": [],
+    "raw_exists": false,
+    "record_count": 0
+  },
+  "claims_report": {
+    "schema": "specnav.codegraph.claims_report.v1",
+    "generated_at": "2026-08-31T03:30:37.781Z",
+    "active_change": "large-request-admission-control",
+    "claims_file": "openspec/changes/large-request-admission-control/codegraph/claims-map.json",
+    "evidence_index": "openspec/changes/large-request-admission-control/codegraph/evidence-index.json",
+    "claims_count": 0,
+    "verified_claims": [],
+    "unverified_claims": [],
+    "blockers": [],
+    "warnings": []
+  },
+  "drift": {
+    "schema": "specnav.codegraph.drift.v1",
+    "active_change": "large-request-admission-control",
+    "drift": [],
+    "blockers": []
+  },
+  "blockers": [],
+  "warnings": [
+    "codegraph:not-indexed"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "change_id": "large-request-admission-control",
+  "assertions": [
+    {
+      "id": "A1",
+      "statement": "Valid requests below the 80 MiB absolute limit are admitted or wait for bounded capacity instead of being rejected solely for exceeding 8 MiB.",
+      "verify_via": "unit",
+      "status": "passing",
+      "evidence_ref": "sdk/api/handlers/request_admission_test.go and sdk/api/handlers/request_body_test.go"
+    },
+    {
+      "id": "A2",
+      "statement": "Encoded or decoded requests above the configured absolute limit return 413.",
+      "verify_via": "unit",
+      "status": "passing",
+      "evidence_ref": "sdk/api/handlers/request_body_test.go"
+    },
+    {
+      "id": "A3",
+      "statement": "A canceled waiter releases its queue slot and temporary spool without invoking a provider.",
+      "verify_via": "redteam",
+      "status": "passing",
+      "evidence_ref": "sdk/api/handlers/request_admission_test.go"
+    },
+    {
+      "id": "A4",
+      "statement": "Queue saturation returns request_capacity_unavailable and does not alter provider auth or cooldown state.",
+      "verify_via": "e2e",
+      "status": "passing",
+      "evidence_ref": "sdk/api/handlers/request_admission_test.go"
+    },
+    {
+      "id": "A5",
+      "statement": "Zstd, Responses WebSocket, multipart image, and video form inputs share bounded request-size protection.",
+      "verify_via": "e2e",
+      "status": "passing",
+      "evidence_ref": "go test ./... and protocol handler tests"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "specnav.codegraph.claims_report.v1",
+  "generated_at": "2026-08-31T03:30:37.781Z",
+  "active_change": "large-request-admission-control",
+  "claims_file": "openspec/changes/large-request-admission-control/codegraph/claims-map.json",
+  "evidence_index": "openspec/changes/large-request-admission-control/codegraph/evidence-index.json",
+  "claims_count": 0,
+  "verified_claims": [],
+  "unverified_claims": [],
+  "blockers": [],
+  "warnings": []
+}

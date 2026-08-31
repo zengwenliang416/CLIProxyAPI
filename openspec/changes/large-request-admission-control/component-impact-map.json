@@ -1,0 +1,47 @@
+{
+  "new_components": [
+    "weighted large-request admission controller",
+    "disk-backed bounded request spool"
+  ],
+  "reused_components": [
+    "BaseAPIHandler request-body boundary",
+    "protocol-neutral ErrorResponse",
+    "Gin request context cancellation",
+    "existing multipart temporary-file cleanup"
+  ],
+  "extraction_triggers": [
+    "HTTP JSON, WebSocket, multipart image, and video form inputs require the same absolute and aggregate capacity policy",
+    "zstd and plain request paths require one bounded body contract"
+  ],
+  "forbidden_dependencies": [
+    "provider credentials",
+    "provider cooldown state",
+    "internal/translator protocol transforms",
+    "deployment-specific Nginx or Docker configuration"
+  ],
+  "hooks": [
+    "configuration hot reload updates handler admission settings",
+    "request completion releases admission and cleans spool files"
+  ],
+  "utilities": [
+    "bounded zstd decoder options",
+    "typed request body too large error",
+    "typed request capacity unavailable error",
+    "bounded multipart and URL-encoded form reader"
+  ],
+  "services": [
+    "shared in-process request admission service"
+  ],
+  "required_component_tests": [
+    "weighted admission capacity and FIFO behavior",
+    "bounded waiter count and saturation error",
+    "context cancellation and temporary-file cleanup",
+    "HTTP JSON encoded and decoded limits",
+    "zstd decoder memory and window bounds",
+    "Responses WebSocket message limit and admission",
+    "multipart image and video form limits",
+    "local capacity errors do not enter provider auth or cooldown paths"
+  ],
+  "unresolved_gaps": [
+  ]
+}

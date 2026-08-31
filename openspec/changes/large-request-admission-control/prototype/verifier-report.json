@@ -1,0 +1,42 @@
+{
+  "schema": "specnav.prototype.verifier.v1",
+  "status": "green",
+  "checked_entry": "api/examples.json",
+  "project_fidelity": {
+    "status": "not applicable",
+    "inventory": "not applicable",
+    "shell_checked": false,
+    "generic_shell_detected": false,
+    "notes": [
+      "Backend-only API contract prototype; no project UI shell exists."
+    ]
+  },
+  "visual_matrix": {
+    "viewports": [
+      "not applicable"
+    ],
+    "theme_modes": [
+      "none"
+    ],
+    "locales": [
+      "none"
+    ],
+    "states": [
+      "admitted",
+      "absolute limit rejected",
+      "capacity queue saturated"
+    ]
+  },
+  "checks": [
+    "Inspected api/examples.json against requirements.md and acceptance.md.",
+    "Confirmed 413 is reserved for the absolute encoded or decoded limit.",
+    "Confirmed 503 uses request_capacity_unavailable and does not use auth_unavailable.",
+    "Confirmed both local failures occur before provider credential selection."
+  ],
+  "evidence": [
+    "prototype/api/examples.json",
+    "acceptance.md",
+    "specs/large-request-admission/spec.md"
+  ],
+  "blockers": []
+}
