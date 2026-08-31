@@ -9,6 +9,22 @@ type SDKConfig struct {
 	// ProxyURL is the URL of an optional proxy server to use for outbound requests.
 	ProxyURL string `yaml:"proxy-url" json:"proxy-url"`
 
+	// MaxDecodedRequestBodyBytes limits request bodies after content decoding.
+	// Values <= 0 use the safe server default.
+	MaxDecodedRequestBodyBytes int64 `yaml:"max-decoded-request-body-bytes,omitempty" json:"max-decoded-request-body-bytes,omitempty"`
+
+	// LargeRequestThresholdBytes controls when request bodies enter weighted
+	// admission. Values <= 0 use the safe server default.
+	LargeRequestThresholdBytes int64 `yaml:"large-request-threshold-bytes,omitempty" json:"large-request-threshold-bytes,omitempty"`
+
+	// MaxWaitingLargeRequests bounds the number of requests waiting for weighted
+	// admission. Values <= 0 use the safe server default.
+	MaxWaitingLargeRequests int `yaml:"max-waiting-large-requests,omitempty" json:"max-waiting-large-requests,omitempty"`
+
+	// MaxInflightRequestMemoryBytes bounds the aggregate admitted weight of
+	// large request bodies. Values <= 0 use the safe server default.
+	MaxInflightRequestMemoryBytes int64 `yaml:"max-inflight-request-memory-bytes,omitempty" json:"max-inflight-request-memory-bytes,omitempty"`
+
 	// DisableImageGeneration controls whether the built-in image_generation tool is injected/allowed.
 	//
 	// Supported values:

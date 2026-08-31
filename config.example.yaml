@@ -44,6 +44,20 @@ api-keys:
 # Enable debug logging
 debug: false
 
+# Maximum request body size after content decoding. Values <= 0 use the default 80 MiB limit.
+# The encoded request body is also bounded by this value before decompression.
+max-decoded-request-body-bytes: 83886080
+
+# Requests above this decoded size are spooled and enter weighted admission.
+large-request-threshold-bytes: 8388608
+
+# Maximum number of large requests waiting for in-flight request capacity.
+max-waiting-large-requests: 16
+
+# Aggregate admitted weight for large request bodies. A request larger than this
+# value may run alone, so the absolute body limit remains the final size policy.
+max-inflight-request-memory-bytes: 1073741824
+
 # Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
 pprof:
   enable: false

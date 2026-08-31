@@ -471,18 +471,33 @@ func multipartFileToDataURL(fileHeader *multipart.FileHeader) (string, error) {
 		}
 	}()
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return "", fmt.Errorf("read upload file failed: %w", err)
-	}
-
 	mediaType := strings.TrimSpace(fileHeader.Header.Get("Content-Type"))
 	if mediaType == "" {
-		mediaType = http.DetectContentType(data)
+		header := make([]byte, 512)
+		n, errRead := io.ReadFull(f, header)
+		if errRead != nil && errRead != io.EOF && errRead != io.ErrUnexpectedEOF {
+			return "", fmt.Errorf("read upload file header failed: %w", errRead)
+		}
+		mediaType = http.DetectContentType(header[:n])
+		if _, errSeek := f.Seek(0, io.SeekStart); errSeek != nil {
+			return "", fmt.Errorf("rewind upload file failed: %w", errSeek)
+		}
 	}
 
-	b64 := base64.StdEncoding.EncodeToString(data)
-	return "data:" + mediaType + ";base64," + b64, nil
+	var encoded strings.Builder
+	encoded.Grow(len("data:") + len(mediaType) + len(";base64,") + base64.StdEncoding.EncodedLen(int(fileHeader.Size)))
+	encoded.WriteString("data:")
+	encoded.WriteString(mediaType)
+	encoded.WriteString(";base64,")
+	encoder := base64.NewEncoder(base64.StdEncoding, &encoded)
+	if _, errCopy := io.Copy(encoder, f); errCopy != nil {
+		_ = encoder.Close()
+		return "", fmt.Errorf("read upload file failed: %w", errCopy)
+	}
+	if errClose := encoder.Close(); errClose != nil {
+		return "", fmt.Errorf("encode upload file failed: %w", errClose)
+	}
+	return encoded.String(), nil
 }
 
 func buildOpenAICompatImagesJSONRequest(rawJSON []byte, imageModel string, stream bool) []byte {
@@ -602,16 +617,12 @@ func (h *OpenAIAPIHandler) ImagesGenerations(c *gin.Context) {
 		return
 	}
 
-	rawJSON, err := handlers.ReadRequestBody(c)
+	rawJSON, err := h.ReadRequestBody(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: fmt.Sprintf("Invalid request: %v", err),
-				Type:    "invalid_request_error",
-			},
-		})
+		handlers.WriteRequestBodyError(c, err)
 		return
 	}
+	defer handlers.ReleaseRequestBody(c)
 	if !json.Valid(rawJSON) {
 		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
 			Error: handlers.ErrorDetail{
@@ -725,6 +736,22 @@ func (h *OpenAIAPIHandler) ImagesEdits(c *gin.Context) {
 }
 
 func (h *OpenAIAPIHandler) imagesEditsFromMultipart(c *gin.Context) {
+	if err := h.ParseRequestForm(c); err != nil {
+		if handlers.IsRequestBodyTooLarge(err) || handlers.IsRequestCapacityUnavailable(err) {
+			handlers.WriteRequestBodyError(c, err)
+			return
+		}
+		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+			Error: handlers.ErrorDetail{
+				Message: fmt.Sprintf("Invalid request: %v", err),
+				Type:    "invalid_request_error",
+			},
+		})
+		return
+	}
+	defer handlers.ReleaseRequestBody(c)
+	defer handlers.CleanupRequestForm(c)
+
 	form, err := c.MultipartForm()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
@@ -771,21 +798,6 @@ func (h *OpenAIAPIHandler) imagesEditsFromMultipart(c *gin.Context) {
 		return
 	}
 
-	images := make([]string, 0, len(imageFiles))
-	for _, fh := range imageFiles {
-		dataURL, err := multipartFileToDataURL(fh)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-				Error: handlers.ErrorDetail{
-					Message: fmt.Sprintf("Invalid request: %v", err),
-					Type:    "invalid_request_error",
-				},
-			})
-			return
-		}
-		images = append(images, dataURL)
-	}
-
 	responseFormat := strings.TrimSpace(c.PostForm("response_format"))
 	if responseFormat == "" {
 		responseFormat = "b64_json"
@@ -807,15 +819,6 @@ func (h *OpenAIAPIHandler) imagesEditsFromMultipart(c *gin.Context) {
 		h.handleRoutedImages(c, imageReq, imageModel, stream)
 		return
 	}
-	if isXAIImagesModel(imageModel) {
-		aspectRatio := xaiImagesAspectRatio(c.PostForm("aspect_ratio"), "")
-		aspectRatio = xaiImagesAspectRatioFromSize(c.PostForm("size"), aspectRatio)
-		resolution := xaiImagesResolution(c.PostForm("resolution"), c.PostForm("size"), "")
-		n := parseIntField(c.PostForm("n"), 0)
-		xaiReq := buildXAIImagesEditRequest(imageModel, prompt, images, responseFormat, aspectRatio, resolution, n)
-		h.handleXAIImages(c, xaiReq, responseFormat, "image_edit", stream)
-		return
-	}
 	if isOpenAICompatImagesModel(imageModel) {
 		compatReq, contentType, errBuild := buildOpenAICompatImagesMultipartRequest(form, imageModel, stream)
 		if errBuild != nil {
@@ -829,6 +832,31 @@ func (h *OpenAIAPIHandler) imagesEditsFromMultipart(c *gin.Context) {
 		}
 		c.Request.Header.Set("Content-Type", contentType)
 		h.handleOpenAICompatImages(c, compatReq, imageModel, responseFormat, "image_edit", stream)
+		return
+	}
+
+	images := make([]string, 0, len(imageFiles))
+	for _, fh := range imageFiles {
+		dataURL, err := multipartFileToDataURL(fh)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
+				Error: handlers.ErrorDetail{
+					Message: fmt.Sprintf("Invalid request: %v", err),
+					Type:    "invalid_request_error",
+				},
+			})
+			return
+		}
+		images = append(images, dataURL)
+	}
+
+	if isXAIImagesModel(imageModel) {
+		aspectRatio := xaiImagesAspectRatio(c.PostForm("aspect_ratio"), "")
+		aspectRatio = xaiImagesAspectRatioFromSize(c.PostForm("size"), aspectRatio)
+		resolution := xaiImagesResolution(c.PostForm("resolution"), c.PostForm("size"), "")
+		n := parseIntField(c.PostForm("n"), 0)
+		xaiReq := buildXAIImagesEditRequest(imageModel, prompt, images, responseFormat, aspectRatio, resolution, n)
+		h.handleXAIImages(c, xaiReq, responseFormat, "image_edit", stream)
 		return
 	}
 
@@ -889,16 +917,12 @@ func (h *OpenAIAPIHandler) imagesEditsFromMultipart(c *gin.Context) {
 }
 
 func (h *OpenAIAPIHandler) imagesEditsFromJSON(c *gin.Context) {
-	rawJSON, err := handlers.ReadRequestBody(c)
+	rawJSON, err := h.ReadRequestBody(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: fmt.Sprintf("Invalid request: %v", err),
-				Type:    "invalid_request_error",
-			},
-		})
+		handlers.WriteRequestBodyError(c, err)
 		return
 	}
+	defer handlers.ReleaseRequestBody(c)
 	if !json.Valid(rawJSON) {
 		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
 			Error: handlers.ErrorDetail{

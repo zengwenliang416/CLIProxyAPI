@@ -287,6 +287,8 @@ type BaseAPIHandler struct {
 	// ModelRouterHost optionally routes matching requests to a plugin executor, the router's own
 	// executor, or a built-in provider before model-to-provider resolution and auth selection.
 	ModelRouterHost PluginModelRouterHost
+
+	requestAdmission *RequestAdmissionController
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
@@ -300,8 +302,9 @@ type BaseAPIHandler struct {
 //   - *BaseAPIHandler: A new API handlers instance
 func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *BaseAPIHandler {
 	return &BaseAPIHandler{
-		Cfg:         cfg,
-		AuthManager: authManager,
+		Cfg:              cfg,
+		AuthManager:      authManager,
+		requestAdmission: NewRequestAdmissionController(cfg),
 	}
 }
 
@@ -311,7 +314,14 @@ func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *B
 // Parameters:
 //   - clients: The new slice of AI service clients
 //   - cfg: The new application configuration
-func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) { h.Cfg = cfg }
+func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) {
+	h.Cfg = cfg
+	if h.requestAdmission == nil {
+		h.requestAdmission = NewRequestAdmissionController(cfg)
+		return
+	}
+	h.requestAdmission.Update(cfg)
+}
 
 // SetPluginHost configures the optional plugin interceptor host.
 func (h *BaseAPIHandler) SetPluginHost(host PluginInterceptorHost) {

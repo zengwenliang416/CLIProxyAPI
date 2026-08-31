@@ -91,11 +91,12 @@ func buildInteractionsExecutionRequest(target interactionsRequestTarget, modelNa
 
 // Interactions handles POST /v1beta/interactions.
 func (h *GeminiAPIHandler) Interactions(c *gin.Context) {
-	rawJSON, errRead := c.GetRawData()
+	rawJSON, errRead := h.ReadRequestBody(c)
 	if errRead != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{Error: handlers.ErrorDetail{Message: errRead.Error(), Type: "invalid_request_error"}})
+		handlers.WriteRequestBodyError(c, errRead)
 		return
 	}
+	defer handlers.ReleaseRequestBody(c)
 	target, errParse := parseInteractionsRequestTarget(rawJSON)
 	if errParse != nil {
 		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{Error: handlers.ErrorDetail{Message: errParse.Error(), Type: "invalid_request_error"}})

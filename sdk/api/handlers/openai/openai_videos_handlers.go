@@ -226,13 +226,16 @@ func responseVideosModel(model string) string {
 	return canonicalXAIVideosModel(model)
 }
 
-func readVideosCreateRequest(c *gin.Context) ([]byte, error) {
+func readVideosCreateRequest(c *gin.Context, base *handlers.BaseAPIHandler) ([]byte, error) {
 	contentType := strings.ToLower(strings.TrimSpace(c.ContentType()))
 	switch contentType {
 	case "multipart/form-data", "application/x-www-form-urlencoded":
+		if err := base.ParseRequestForm(c); err != nil {
+			return nil, err
+		}
 		return videosCreateRequestFromForm(c)
 	default:
-		rawJSON, err := handlers.ReadRequestBody(c)
+		rawJSON, err := base.ReadRequestBody(c)
 		if err != nil {
 			return nil, err
 		}
@@ -243,8 +246,8 @@ func readVideosCreateRequest(c *gin.Context) ([]byte, error) {
 	}
 }
 
-func readXAIVideosNativeRequest(c *gin.Context) ([]byte, error) {
-	rawJSON, err := handlers.ReadRequestBody(c)
+func readXAIVideosNativeRequest(c *gin.Context, base *handlers.BaseAPIHandler) ([]byte, error) {
+	rawJSON, err := base.ReadRequestBody(c)
 	if err != nil {
 		return nil, err
 	}
@@ -690,11 +693,17 @@ func openAIVideoStatus(status string) string {
 }
 
 func (h *OpenAIAPIHandler) VideosCreate(c *gin.Context) {
-	rawJSON, err := readVideosCreateRequest(c)
+	rawJSON, err := readVideosCreateRequest(c, h.BaseAPIHandler)
 	if err != nil {
+		if handlers.IsRequestBodyTooLarge(err) || handlers.IsRequestCapacityUnavailable(err) {
+			handlers.WriteRequestBodyError(c, err)
+			return
+		}
 		writeVideosFailedError(c, http.StatusBadRequest, defaultXAIVideosModel, "invalid_request_error", fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
+	defer handlers.ReleaseRequestBody(c)
+	defer handlers.CleanupRequestForm(c)
 
 	videoModel := strings.TrimSpace(gjson.GetBytes(rawJSON, "model").String())
 	if videoModel == "" {
@@ -726,16 +735,12 @@ func (h *OpenAIAPIHandler) XAIVideosExtensions(c *gin.Context) {
 }
 
 func (h *OpenAIAPIHandler) handleXAIVideosNativePost(c *gin.Context) {
-	rawJSON, err := readXAIVideosNativeRequest(c)
+	rawJSON, err := readXAIVideosNativeRequest(c, h.BaseAPIHandler)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, handlers.ErrorResponse{
-			Error: handlers.ErrorDetail{
-				Message: fmt.Sprintf("Invalid request: %v", err),
-				Type:    "invalid_request_error",
-			},
-		})
+		handlers.WriteRequestBodyError(c, err)
 		return
 	}
+	defer handlers.ReleaseRequestBody(c)
 
 	videoModel := strings.TrimSpace(gjson.GetBytes(rawJSON, "model").String())
 	if videoModel == "" {
