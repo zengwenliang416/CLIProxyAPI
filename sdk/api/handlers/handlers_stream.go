@@ -142,6 +142,10 @@ func (h *BaseAPIHandler) streamWithPluginExecutor(ctx context.Context, entryProt
 	if responseProtocol == "openai-response" {
 		responseSSEValidator = &sseJSONValidationState{}
 	}
+	var imageSSEValidator *imageSSECompletionState
+	if responseProtocol == "openai-image" {
+		imageSSEValidator = &imageSSECompletionState{}
+	}
 	go func() {
 		completionOutcome := pluginapi.RequestCompletionSucceeded
 		completionStatus := http.StatusOK
@@ -191,13 +195,32 @@ func (h *BaseAPIHandler) streamWithPluginExecutor(ctx context.Context, entryProt
 						}
 					}
 				}
+				if imageSSEValidator != nil {
+					if errValidate := imageSSEValidator.Finish(); errValidate != nil {
+						completionOutcome = pluginapi.RequestCompletionFailed
+						completionStatus = http.StatusBadGateway
+						completionErr = errValidate
+						select {
+						case errChan <- &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: errValidate}:
+						case <-done:
+							completionOutcome = pluginapi.RequestCompletionCanceled
+							completionStatus = 0
+							if ctx != nil {
+								completionErr = ctx.Err()
+							}
+						}
+					}
+				}
 				return
 			}
 			if chunk.Err != nil {
 				errMsg := executionErrorMessage(chunk.Err)
+				if imageSSEValidator != nil {
+					errMsg = imageStreamErrorMessage(chunk.Err)
+				}
 				completionOutcome = pluginapi.RequestCompletionFailed
 				completionStatus = errMsg.StatusCode
-				completionErr = chunk.Err
+				completionErr = errMsg.Error
 				select {
 				case errChan <- errMsg:
 				case <-done:
@@ -265,6 +288,23 @@ func (h *BaseAPIHandler) streamWithPluginExecutor(ctx context.Context, entryProt
 				payload = validatedPayload
 				if len(payload) == 0 {
 					continue
+				}
+			}
+			if imageSSEValidator != nil {
+				if errValidate := imageSSEValidator.AddChunk(payload); errValidate != nil {
+					completionOutcome = pluginapi.RequestCompletionFailed
+					completionStatus = http.StatusBadGateway
+					completionErr = errValidate
+					select {
+					case errChan <- &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: errValidate}:
+					case <-done:
+						completionOutcome = pluginapi.RequestCompletionCanceled
+						completionStatus = 0
+						if ctx != nil {
+							completionErr = ctx.Err()
+						}
+					}
+					return
 				}
 			}
 			select {
@@ -355,6 +395,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	if err != nil {
 		err = enrichAuthSelectionError(err, providers, normalizedModel)
 		errMsg := executionErrorMessage(err)
+		if allowImageModel {
+			errMsg = imageStreamErrorMessage(err)
+		}
 		lifecycle.completeError(ctx, errMsg)
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		errChan <- errMsg
@@ -427,6 +470,10 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 	if responseProtocol == "openai-response" {
 		responseSSEValidator = &sseJSONValidationState{}
 	}
+	var imageSSEValidator *imageSSECompletionState
+	if allowImageModel {
+		imageSSEValidator = &imageSSECompletionState{}
+	}
 
 	transformStreamPayload := func(payload []byte, chunkIndex *int, historyChunks [][]byte) ([]byte, bool, *interfaces.ErrorMessage) {
 		applyStreamHeaderInit()
@@ -470,6 +517,11 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 			payload = validatedPayload
 			if len(payload) == 0 {
 				return nil, false, nil
+			}
+		}
+		if imageSSEValidator != nil {
+			if errValidate := imageSSEValidator.AddChunk(payload); errValidate != nil {
+				return nil, false, &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: errValidate}
 			}
 		}
 		return payload, true, nil
@@ -544,16 +596,26 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 		}
 		if bootstrapRetries >= maxBootstrapRetries || !bootstrapEligible(bootstrapStreamErr) {
 			bootstrapErr = executionErrorMessage(bootstrapStreamErr)
+			if allowImageModel {
+				bootstrapErr = imageStreamErrorMessage(bootstrapStreamErr)
+			}
 			break
 		}
 		bootstrapRetries++
 		retryResult, retryErr := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 		if retryErr != nil {
 			originalBootstrapErr := executionErrorMessage(bootstrapStreamErr)
+			if allowImageModel {
+				originalBootstrapErr = imageStreamErrorMessage(bootstrapStreamErr)
+			}
 			if isAuthSelectionUnavailable(retryErr) && originalBootstrapErr.StatusCode >= http.StatusInternalServerError {
 				bootstrapErr = originalBootstrapErr
 			} else {
-				bootstrapErr = executionErrorMessage(enrichAuthSelectionError(retryErr, providers, normalizedModel))
+				retryErr = enrichAuthSelectionError(retryErr, providers, normalizedModel)
+				bootstrapErr = executionErrorMessage(retryErr)
+				if allowImageModel {
+					bootstrapErr = imageStreamErrorMessage(retryErr)
+				}
 			}
 			break
 		}
@@ -571,6 +633,9 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 		bootstrapHistoryChunks = nil
 		if responseSSEValidator != nil {
 			responseSSEValidator = &sseJSONValidationState{}
+		}
+		if imageSSEValidator != nil {
+			imageSSEValidator = &imageSSECompletionState{}
 		}
 		chunks = retryResult.Chunks
 		if chunks == nil {
@@ -681,13 +746,25 @@ func (h *BaseAPIHandler) executeStreamWithAuthManagerFormats(ctx context.Context
 						_ = sendErr(errMsg)
 					}
 				}
+				if imageSSEValidator != nil {
+					if errValidate := imageSSEValidator.Finish(); errValidate != nil {
+						errMsg := &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: errValidate}
+						completionOutcome = pluginapi.RequestCompletionFailed
+						completionStatus = errMsg.StatusCode
+						completionErr = errMsg.Error
+						_ = sendErr(errMsg)
+					}
+				}
 				return
 			}
 			if chunk.Err != nil {
 				errMsg := executionErrorMessage(chunk.Err)
+				if imageSSEValidator != nil {
+					errMsg = imageStreamErrorMessage(chunk.Err)
+				}
 				completionOutcome = pluginapi.RequestCompletionFailed
 				completionStatus = errMsg.StatusCode
-				completionErr = chunk.Err
+				completionErr = errMsg.Error
 				if !sendErr(errMsg) && ctx != nil && ctx.Err() != nil {
 					completionOutcome = pluginapi.RequestCompletionCanceled
 					completionStatus = 0

@@ -642,6 +642,182 @@ func TestExecuteStreamWithAuthManager_EmptyClosedStream(t *testing.T) {
 	}
 }
 
+func TestExecuteImageStreamWithAuthManager_RequiresFinalImage(t *testing.T) {
+	upstreamErr := &coreauth.Error{
+		Code:       "upstream_busy",
+		Message:    "image upstream busy",
+		HTTPStatus: http.StatusTooManyRequests,
+	}
+	tests := []struct {
+		name       string
+		chunks     []coreexecutor.StreamChunk
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "empty stream",
+			wantStatus: http.StatusBadGateway,
+			wantError:  "upstream image stream closed before final image",
+		},
+		{
+			name: "keepalive only",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte(": keep-alive\n\n")},
+			},
+			wantStatus: http.StatusBadGateway,
+			wantError:  "upstream image stream closed before final image",
+		},
+		{
+			name: "partial only",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"AA==\"}\n\n")},
+			},
+			wantStatus: http.StatusBadGateway,
+			wantError:  "upstream image stream closed before final image",
+		},
+		{
+			name: "done without completed",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("data: [DONE]\n\n")},
+			},
+			wantStatus: http.StatusBadGateway,
+			wantError:  "upstream image stream closed before final image",
+		},
+		{
+			name: "completed without image",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\"}\n\n")},
+			},
+			wantStatus: http.StatusBadGateway,
+			wantError:  "upstream image stream closed before final image",
+		},
+		{
+			name: "upstream error takes precedence",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"AA==\"}\n\n")},
+				{Err: upstreamErr},
+			},
+			wantStatus: http.StatusTooManyRequests,
+			wantError:  "image upstream busy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executor := &bootstrapStreamExecutor{stream: func(_ context.Context, _ int) (*coreexecutor.StreamResult, error) {
+				chunks := make(chan coreexecutor.StreamChunk, len(tt.chunks))
+				for _, chunk := range tt.chunks {
+					chunks <- chunk
+				}
+				close(chunks)
+				return &coreexecutor.StreamResult{Chunks: chunks}, nil
+			}}
+			handler, _ := registerBootstrapExecutor(t, executor)
+			completions := make(chan pluginapi.RequestCompletion, 1)
+			handler.SetPluginHost(&handlerInterceptorTestHost{
+				completeRequest: func(_ context.Context, completion pluginapi.RequestCompletion) {
+					completions <- completion
+				},
+			})
+
+			dataChan, _, errChan := handler.ExecuteImageStreamWithAuthManager(context.Background(), "openai-image", "bootstrap-model", []byte(`{"model":"bootstrap-model"}`), "")
+			for range dataChan {
+			}
+
+			var streamErr *interfaces.ErrorMessage
+			for msg := range errChan {
+				if msg != nil {
+					streamErr = msg
+				}
+			}
+			if streamErr == nil {
+				t.Fatal("image stream error = nil")
+			}
+			if streamErr.StatusCode != tt.wantStatus {
+				t.Fatalf("image stream status = %d, want %d; err=%v", streamErr.StatusCode, tt.wantStatus, streamErr.Error)
+			}
+			if streamErr.Error == nil || !strings.Contains(streamErr.Error.Error(), tt.wantError) {
+				t.Fatalf("image stream error = %v, want containing %q", streamErr.Error, tt.wantError)
+			}
+			select {
+			case completion := <-completions:
+				if completion.Outcome != pluginapi.RequestCompletionFailed || completion.StatusCode != tt.wantStatus {
+					t.Fatalf("image stream completion = %#v, want failed status %d", completion, tt.wantStatus)
+				}
+				if !strings.Contains(completion.Error, tt.wantError) {
+					t.Fatalf("image stream completion error = %q, want containing %q", completion.Error, tt.wantError)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("missing failed image stream lifecycle completion")
+			}
+		})
+	}
+}
+
+func TestExecuteImageStreamWithAuthManager_AcceptsCompletedImage(t *testing.T) {
+	tests := []struct {
+		name   string
+		chunks []coreexecutor.StreamChunk
+	}{
+		{
+			name: "generation b64 json",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"AA==\"}\n\n")},
+			},
+		},
+		{
+			name: "edit url split across chunks",
+			chunks: []coreexecutor.StreamChunk{
+				{Payload: []byte("event: image_edit.completed\ndata: {\"type\":\"image_edit.completed\",")},
+				{Payload: []byte("\"url\":\"https://example.com/image.png\"}\n\n")},
+				{Payload: []byte("data: [DONE]\n\n")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			executor := &bootstrapStreamExecutor{stream: func(_ context.Context, _ int) (*coreexecutor.StreamResult, error) {
+				chunks := make(chan coreexecutor.StreamChunk, len(tt.chunks))
+				for _, chunk := range tt.chunks {
+					chunks <- chunk
+				}
+				close(chunks)
+				return &coreexecutor.StreamResult{Chunks: chunks}, nil
+			}}
+			handler, _ := registerBootstrapExecutor(t, executor)
+			completions := make(chan pluginapi.RequestCompletion, 1)
+			handler.SetPluginHost(&handlerInterceptorTestHost{
+				completeRequest: func(_ context.Context, completion pluginapi.RequestCompletion) {
+					completions <- completion
+				},
+			})
+
+			dataChan, _, errChan := handler.ExecuteImageStreamWithAuthManager(context.Background(), "openai-image", "bootstrap-model", []byte(`{"model":"bootstrap-model"}`), "")
+			var got []byte
+			for chunk := range dataChan {
+				got = append(got, chunk...)
+			}
+			for msg := range errChan {
+				if msg != nil {
+					t.Fatalf("unexpected image stream error: %+v", msg)
+				}
+			}
+			if len(got) == 0 {
+				t.Fatal("completed image stream produced no data")
+			}
+			select {
+			case completion := <-completions:
+				if completion.Outcome != pluginapi.RequestCompletionSucceeded || completion.StatusCode != http.StatusOK {
+					t.Fatalf("image stream completion = %#v, want success", completion)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("missing successful image stream lifecycle completion")
+			}
+		})
+	}
+}
+
 type handlerReleaseNotification struct {
 	group    executionregistry.ReleaseGroup
 	sequence int64
