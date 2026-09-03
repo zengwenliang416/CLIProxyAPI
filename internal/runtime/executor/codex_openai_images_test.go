@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -175,6 +176,205 @@ func TestCodexExecutorDirectOpenAIImageGenerationStreamsImagesEndpoint(t *testin
 	out := combined.String()
 	if !strings.Contains(out, "event: image_generation.partial_image") || !strings.Contains(out, "event: image_generation.completed") {
 		t.Fatalf("stream output missing image events: %q", out)
+	}
+}
+
+func TestCodexExecutorDirectOpenAIImageEditStreamUsesNonStreamUpstream(t *testing.T) {
+	var gotPath string
+	var gotAccept string
+	var gotContentType string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAccept = r.Header.Get("Accept")
+		gotContentType = r.Header.Get("Content-Type")
+		var errRead error
+		gotBody, errRead = io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Fatalf("read body: %v", errRead)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"created":1713833628,"data":[{"b64_json":"AA==","revised_prompt":"Use a blue background"},{"url":"https://example.com/image.png"}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{})
+	stream, errStream := executor.ExecuteStream(context.Background(), newCodexOpenAIImageTestAuth(server.URL), cliproxyexecutor.Request{
+		Model:   "gpt-image-2",
+		Payload: []byte(`{"model":"gpt-image-2","prompt":"Replace the background","images":[{"file_id":"file-abc123"}],"stream":true,"partial_images":2}`),
+	}, codexOpenAIImageTestOptions(codexImagesEditsPath, true))
+	if errStream != nil {
+		t.Fatalf("ExecuteStream() error = %v", errStream)
+	}
+
+	var combined bytes.Buffer
+	for chunk := range stream.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error = %v", chunk.Err)
+		}
+		combined.Write(chunk.Payload)
+	}
+
+	if gotPath != "/images/edits" {
+		t.Fatalf("path = %q, want /images/edits", gotPath)
+	}
+	if gotAccept != "application/json" {
+		t.Fatalf("Accept = %q, want application/json", gotAccept)
+	}
+	if gotContentType != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", gotContentType)
+	}
+	if gjson.GetBytes(gotBody, "stream").Exists() {
+		t.Fatalf("stream should be removed from upstream body: %s", string(gotBody))
+	}
+	if gjson.GetBytes(gotBody, "partial_images").Exists() {
+		t.Fatalf("partial_images should be removed from upstream body: %s", string(gotBody))
+	}
+	if got := stream.Headers.Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("stream Content-Type = %q, want text/event-stream", got)
+	}
+	if got := stream.Headers.Get("Content-Length"); got != "" {
+		t.Fatalf("stream Content-Length = %q, want empty", got)
+	}
+
+	out := combined.String()
+	if got := strings.Count(out, "event: image_edit.completed"); got != 2 {
+		t.Fatalf("completed event count = %d, want 2; output=%q", got, out)
+	}
+	if !strings.Contains(out, `"b64_json":"AA=="`) {
+		t.Fatalf("stream output missing b64_json: %q", out)
+	}
+	if !strings.Contains(out, `"url":"https://example.com/image.png"`) {
+		t.Fatalf("stream output missing url: %q", out)
+	}
+	if !strings.Contains(out, `"revised_prompt":"Use a blue background"`) {
+		t.Fatalf("stream output missing revised_prompt: %q", out)
+	}
+	if !strings.Contains(out, `"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}`) {
+		t.Fatalf("stream output missing usage: %q", out)
+	}
+}
+
+func TestCodexExecutorDirectOpenAIImageEditMultipartStreamUsesNonStreamUpstream(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if errWrite := writer.WriteField("model", "gpt-image-2"); errWrite != nil {
+		t.Fatalf("write model field: %v", errWrite)
+	}
+	if errWrite := writer.WriteField("prompt", "Replace the background"); errWrite != nil {
+		t.Fatalf("write prompt field: %v", errWrite)
+	}
+	if errWrite := writer.WriteField("stream", "true"); errWrite != nil {
+		t.Fatalf("write stream field: %v", errWrite)
+	}
+	if errWrite := writer.WriteField("partial_images", "1"); errWrite != nil {
+		t.Fatalf("write partial_images field: %v", errWrite)
+	}
+	imagePart, errCreate := writer.CreateFormFile("image[]", "source.png")
+	if errCreate != nil {
+		t.Fatalf("create image field: %v", errCreate)
+	}
+	if _, errWrite := imagePart.Write([]byte("png-data")); errWrite != nil {
+		t.Fatalf("write image data: %v", errWrite)
+	}
+	if errClose := writer.Close(); errClose != nil {
+		t.Fatalf("close multipart writer: %v", errClose)
+	}
+
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var errRead error
+		gotBody, errRead = io.ReadAll(r.Body)
+		if errRead != nil {
+			t.Fatalf("read body: %v", errRead)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"AA=="}]}`))
+	}))
+	defer server.Close()
+
+	opts := codexOpenAIImageTestOptions(codexImagesEditsPath, true)
+	opts.Headers = http.Header{"Content-Type": []string{writer.FormDataContentType()}}
+	executor := NewCodexExecutor(&config.Config{})
+	stream, errStream := executor.ExecuteStream(context.Background(), newCodexOpenAIImageTestAuth(server.URL), cliproxyexecutor.Request{
+		Model:   "gpt-image-2",
+		Payload: body.Bytes(),
+	}, opts)
+	if errStream != nil {
+		t.Fatalf("ExecuteStream() error = %v", errStream)
+	}
+	for chunk := range stream.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error = %v", chunk.Err)
+		}
+	}
+
+	if !json.Valid(gotBody) {
+		t.Fatalf("upstream body is not valid JSON: %s", string(gotBody))
+	}
+	if gjson.GetBytes(gotBody, "stream").Exists() {
+		t.Fatalf("stream should be removed from upstream body: %s", string(gotBody))
+	}
+	if gjson.GetBytes(gotBody, "partial_images").Exists() {
+		t.Fatalf("partial_images should be removed from upstream body: %s", string(gotBody))
+	}
+	if got := gjson.GetBytes(gotBody, "images.0.image_url").String(); !strings.Contains(got, ";base64,cG5nLWRhdGE=") {
+		t.Fatalf("images.0.image_url = %q, want png data URL; body=%s", got, string(gotBody))
+	}
+}
+
+func TestCodexExecutorDirectOpenAIImageEditStreamRejectsEmptyOutputWithoutRetry(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"usage":{"total_tokens":7}}`))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{})
+	_, errStream := executor.ExecuteStream(context.Background(), newCodexOpenAIImageTestAuth(server.URL), cliproxyexecutor.Request{
+		Model:   "gpt-image-2",
+		Payload: []byte(`{"model":"gpt-image-2","prompt":"Replace the background","images":[{"file_id":"file-abc123"}],"stream":true}`),
+	}, codexOpenAIImageTestOptions(codexImagesEditsPath, true))
+	if errStream == nil {
+		t.Fatal("ExecuteStream() error = nil, want empty image output error")
+	}
+	var statusErr cliproxyexecutor.StatusError
+	if !errors.As(errStream, &statusErr) || statusErr.StatusCode() != http.StatusBadGateway {
+		t.Fatalf("status error = %T %v, want status %d", errStream, errStream, http.StatusBadGateway)
+	}
+	requestScoped, ok := errStream.(cliproxyexecutor.RequestScopedError)
+	if !ok || !requestScoped.IsRequestScoped() {
+		t.Fatalf("error = %T, want request-scoped error: %v", errStream, errStream)
+	}
+	if requests != 1 {
+		t.Fatalf("upstream requests = %d, want 1", requests)
+	}
+}
+
+func TestCodexExecutorDirectOpenAIImageEditStreamPreservesUpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{})
+	_, errStream := executor.ExecuteStream(context.Background(), newCodexOpenAIImageTestAuth(server.URL), cliproxyexecutor.Request{
+		Model:   "gpt-image-2",
+		Payload: []byte(`{"model":"gpt-image-2","prompt":"Replace the background","images":[{"file_id":"file-abc123"}],"stream":true}`),
+	}, codexOpenAIImageTestOptions(codexImagesEditsPath, true))
+	if errStream == nil {
+		t.Fatal("ExecuteStream() error = nil, want upstream error")
+	}
+	var statusErr cliproxyexecutor.StatusError
+	if !errors.As(errStream, &statusErr) || statusErr.StatusCode() != http.StatusTooManyRequests {
+		t.Fatalf("status error = %T %v, want status %d", errStream, errStream, http.StatusTooManyRequests)
+	}
+	if !strings.Contains(errStream.Error(), "rate limited") {
+		t.Fatalf("error = %q, want upstream message", errStream.Error())
 	}
 }
 
