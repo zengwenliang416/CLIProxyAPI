@@ -52,6 +52,14 @@ type codexImageCallResult struct {
 	Quality       string
 }
 
+type codexImageOutputError struct {
+	message string
+}
+
+func (e codexImageOutputError) Error() string       { return e.message }
+func (codexImageOutputError) StatusCode() int       { return http.StatusBadGateway }
+func (codexImageOutputError) IsRequestScoped() bool { return true }
+
 func isCodexOpenAIImageRequest(opts cliproxyexecutor.Options) bool {
 	if !strings.EqualFold(strings.TrimSpace(opts.SourceFormat.String()), codexOpenAIImageSourceFormat) {
 		return false
@@ -377,6 +385,10 @@ func (e *CodexExecutor) executeDirectOpenAIImage(ctx context.Context, auth *clip
 }
 
 func (e *CodexExecutor) executeDirectOpenAIImageStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, endpointPath string) (_ *cliproxyexecutor.StreamResult, err error) {
+	if endpointPath == codexDirectImagesEdit {
+		return e.executeDirectOpenAIImageEditStream(ctx, auth, req, opts, endpointPath)
+	}
+
 	body, contentType, model, errPrepare := codexPrepareDirectOpenAIImageBody(req, opts, true)
 	if errPrepare != nil {
 		return nil, errPrepare
@@ -471,6 +483,129 @@ func (e *CodexExecutor) executeDirectOpenAIImageStream(ctx context.Context, auth
 		}
 	}()
 	return &cliproxyexecutor.StreamResult{Headers: httpResp.Header.Clone(), Chunks: out}, nil
+}
+
+func (e *CodexExecutor) executeDirectOpenAIImageEditStream(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, endpointPath string) (_ *cliproxyexecutor.StreamResult, err error) {
+	body, contentType, model, errPrepare := codexPrepareDirectOpenAIImageBody(req, opts, false)
+	if errPrepare != nil {
+		return nil, errPrepare
+	}
+	body, _ = sjson.DeleteBytes(body, "partial_images")
+
+	apiKey, baseURL := codexCreds(auth)
+	if baseURL == "" {
+		baseURL = "https://chatgpt.com/backend-api/codex"
+	}
+
+	reporter := helps.NewExecutorUsageReporter(ctx, e, model, auth)
+	defer reporter.TrackFailure(ctx, &err)
+	reporter.SetTranslatedReasoningEffort(body, "openai")
+
+	url := strings.TrimSuffix(baseURL, "/") + endpointPath
+	var identityState codexIdentityConfuseState
+	httpReq, body, identityState, errCache := e.cacheHelper(ctx, sdktranslator.FromString(codexOpenAIImageSourceFormat), url, auth, req, req.Payload, body)
+	if errCache != nil {
+		return nil, errCache
+	}
+	applyCodexDirectImageHeaders(httpReq, auth, apiKey, false, e.cfg)
+	applyModelHeaderOverrides(httpReq.Header, model)
+	if contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
+	}
+	applyCodexIdentityConfuseHeaders(httpReq.Header, &identityState)
+	recordCodexOpenAIImageRequest(ctx, e.cfg, e.Identifier(), auth, url, httpReq.Header.Clone(), body)
+
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient = reporter.TrackHTTPClient(httpClient)
+	httpResp, errDo := httpClient.Do(httpReq)
+	if errDo != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, errDo)
+		return nil, errDo
+	}
+	defer func() {
+		if errClose := httpResp.Body.Close(); errClose != nil {
+			log.Errorf("codex executor: close response body error: %v", errClose)
+		}
+	}()
+
+	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	data, errRead := io.ReadAll(httpResp.Body)
+	if errRead != nil {
+		helps.RecordAPIResponseError(ctx, e.cfg, errRead)
+		return nil, errRead
+	}
+	data = applyCodexIdentityConfuseResponsePayload(data, identityState)
+	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		helps.LogWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, helps.SummarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+		err = newCodexStatusErr(httpResp.StatusCode, data)
+		return nil, err
+	}
+
+	usageDetail := helps.ParseOpenAIUsage(data)
+	frames, errFrames := codexBuildDirectOpenAIImageEditCompletedFrames(data)
+	if errFrames != nil {
+		err = codexImageOutputError{message: errFrames.Error()}
+		reporter.PublishFailureWithDetail(ctx, usageDetail, err)
+		return nil, err
+	}
+
+	reporter.Publish(ctx, usageDetail)
+	reporter.EnsurePublished(ctx)
+
+	headers := httpResp.Header.Clone()
+	headers.Set("Content-Type", "text/event-stream")
+	headers.Del("Content-Length")
+	out := make(chan cliproxyexecutor.StreamChunk, len(frames))
+	for _, frame := range frames {
+		out <- cliproxyexecutor.StreamChunk{Payload: frame}
+	}
+	close(out)
+	return &cliproxyexecutor.StreamResult{Headers: headers, Chunks: out}, nil
+}
+
+func codexBuildDirectOpenAIImageEditCompletedFrames(payload []byte) ([][]byte, error) {
+	if !json.Valid(payload) {
+		return nil, fmt.Errorf("upstream returned invalid image response JSON")
+	}
+
+	data := gjson.GetBytes(payload, "data")
+	if !data.Exists() || !data.IsArray() {
+		return nil, fmt.Errorf("upstream did not return image output")
+	}
+
+	var usageRaw []byte
+	if usage := gjson.GetBytes(payload, "usage"); usage.Exists() && usage.IsObject() {
+		usageRaw = []byte(usage.Raw)
+	}
+
+	items := data.Array()
+	frames := make([][]byte, 0, len(items))
+	for _, item := range items {
+		b64JSON := strings.TrimSpace(item.Get("b64_json").String())
+		imageURL := strings.TrimSpace(item.Get("url").String())
+		if b64JSON == "" && imageURL == "" {
+			continue
+		}
+
+		eventData := []byte(`{"type":"image_edit.completed"}`)
+		if b64JSON != "" {
+			eventData, _ = sjson.SetBytes(eventData, "b64_json", b64JSON)
+		} else {
+			eventData, _ = sjson.SetBytes(eventData, "url", imageURL)
+		}
+		if revisedPrompt := strings.TrimSpace(item.Get("revised_prompt").String()); revisedPrompt != "" {
+			eventData, _ = sjson.SetBytes(eventData, "revised_prompt", revisedPrompt)
+		}
+		if len(usageRaw) > 0 {
+			eventData, _ = sjson.SetRawBytes(eventData, "usage", usageRaw)
+		}
+		frames = append(frames, codexBuildSSEFrame("image_edit.completed", eventData))
+	}
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("upstream did not return image output")
+	}
+	return frames, nil
 }
 
 func codexDirectOpenAIImageEndpoint(req cliproxyexecutor.Request, opts cliproxyexecutor.Options) string {
