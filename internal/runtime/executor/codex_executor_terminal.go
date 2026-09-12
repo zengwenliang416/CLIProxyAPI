@@ -8,11 +8,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
 const codexIncompleteStreamMessage = "stream error: stream disconnected before completion: stream closed before response.completed"
+
+type codexEmptyIncompleteStreamError struct{ statusErr }
+
+func newCodexEmptyIncompleteStreamError() codexEmptyIncompleteStreamError {
+	return codexEmptyIncompleteStreamError{statusErr: statusErr{code: http.StatusBadGateway, msg: helps.CodexEmptyIncompleteStreamMessage}}
+}
+
+func (codexEmptyIncompleteStreamError) IsRequestScoped() bool { return true }
 
 type codexIncompleteStreamError struct {
 	statusErr
