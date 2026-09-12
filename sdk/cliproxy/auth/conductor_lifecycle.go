@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
 )
 
 // SetRetryConfig updates additional credential retry rounds, the per-round credential limit, and the cooldown wait interval.
@@ -123,9 +124,25 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	auth.Success = existing.Success
 	auth.Failed = existing.Failed
 	auth.recentRequests = existing.recentRequests
+	now := time.Now()
+	cooldownStateChanged := false
+	var resumedModels []string
 	if !existing.Disabled && existing.Status != StatusDisabled && !auth.Disabled && auth.Status != StatusDisabled {
 		if len(auth.ModelStates) == 0 && len(existing.ModelStates) > 0 {
-			auth.ModelStates = existing.ModelStates
+			auth.ModelStates = existing.Clone().ModelStates
+		}
+		if CredentialsChanged(existing, auth) {
+			if hasUnauthorizedAuthFailure(existing) || hasUnauthorizedAuthFailure(auth) {
+				auth.Unavailable = false
+				auth.LastError = nil
+				auth.StatusMessage = ""
+				auth.Status = StatusActive
+				auth.NextRetryAfter = time.Time{}
+				auth.NextRefreshAfter = time.Time{}
+				cooldownStateChanged = true
+			}
+			resumedModels = clearUnauthorizedModelStates(auth, now)
+			cooldownStateChanged = len(resumedModels) > 0 || cooldownStateChanged
 		}
 		if existing.Quota.Exceeded && existing.Quota.Reason == "credential_quota" && existing.Quota.NextRecoverAt.After(time.Now()) {
 			auth.Unavailable = existing.Unavailable
@@ -136,8 +153,7 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 			}
 		}
 	}
-	now := time.Now()
-	cooldownStateChanged := normalizeModelStates(auth)
+	cooldownStateChanged = normalizeModelStates(auth) || cooldownStateChanged
 	if m.cooldownDisabledForAuth(auth) || auth.Disabled || auth.Status == StatusDisabled {
 		cooldownStateChanged = clearCooldownStateForAuth(auth, now) || cooldownStateChanged
 	}
@@ -145,6 +161,9 @@ func (m *Manager) Update(ctx context.Context, auth *Auth) (*Auth, error) {
 	authClone := auth.Clone()
 	m.auths[auth.ID] = authClone
 	m.mu.Unlock()
+	for _, model := range resumedModels {
+		registry.GetGlobalRegistry().ResumeClientModel(auth.ID, model)
+	}
 	if !shouldDeferAPIKeyModelAliasRebuild(ctx) {
 		m.rebuildAPIKeyModelAliasFromRuntimeConfig()
 	}

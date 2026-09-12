@@ -56,6 +56,7 @@ type Builder struct {
 
 	// postAuthHook is called after auth record creation and before persistence.
 	postAuthHook coreauth.PostAuthHook
+	resultPolicy coreauth.ResultPolicy
 
 	// serverOptions contains additional server configuration options.
 	serverOptions []api.ServerOption
@@ -186,6 +187,12 @@ func (b *Builder) WithPostAuthHook(hook coreauth.PostAuthHook) *Builder {
 	return b
 }
 
+// WithResultPolicy sets a policy invoked before quota and cooldown mutations.
+func (b *Builder) WithResultPolicy(policy coreauth.ResultPolicy) *Builder {
+	b.resultPolicy = policy
+	return b
+}
+
 // Build validates inputs, applies defaults, and returns a ready-to-run service.
 func (b *Builder) Build() (*Service, error) {
 	if b.cfg == nil {
@@ -260,6 +267,9 @@ func (b *Builder) Build() (*Service, error) {
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
 	coreManager.SetConfig(b.cfg)
 	coreManager.SetOAuthModelAlias(b.cfg.OAuthModelAlias)
+	if b.resultPolicy != nil {
+		coreManager.SetResultPolicy(b.resultPolicy)
+	}
 	if pluginHost != nil {
 		coreManager.SetPluginScheduler(pluginHost)
 	}

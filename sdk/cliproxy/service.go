@@ -125,3 +125,19 @@ type Service struct {
 	homePluginSyncFetch          func(context.Context, sdkpluginstore.PluginSyncRequest) (sdkpluginstore.PluginSyncResponse, error)
 	homePluginDeleteTask         func(context.Context, *config.Config, home.PluginTask) homeplugins.SyncReport
 }
+
+// SetResultPolicy sets the execution result policy on the core auth manager.
+func (s *Service) SetResultPolicy(policy coreauth.ResultPolicy) {
+	if s == nil || s.coreManager == nil {
+		return
+	}
+	s.coreManager.SetResultPolicy(policy)
+}
+
+// ResultPolicy returns the configured execution result policy.
+func (s *Service) ResultPolicy() coreauth.ResultPolicy {
+	if s == nil || s.coreManager == nil {
+		return nil
+	}
+	return s.coreManager.ResultPolicy()
+}
