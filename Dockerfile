@@ -1,3 +1,19 @@
+FROM oven/bun:1.3.14 AS management-center-builder
+
+WORKDIR /app/management-center
+
+COPY management-center/package.json management-center/bun.lock ./
+
+RUN bun install --frozen-lockfile
+
+COPY management-center/ .
+
+ARG MANAGEMENT_VERSION=v1.25.0-owned
+
+RUN VERSION="${MANAGEMENT_VERSION}" bun run build \
+    && mkdir -p /out \
+    && cp dist/index.html /out/management.html
+
 FROM golang:1.26-bookworm AS builder
 
 WORKDIR /app
@@ -9,6 +25,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+COPY --from=management-center-builder /out/management.html ./static/management.html
 
 ARG VERSION=dev
 ARG COMMIT=none
@@ -23,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata ca-certi
 RUN mkdir /CLIProxyAPI
 
 COPY --from=builder ./app/CLIProxyAPI /CLIProxyAPI/CLIProxyAPI
+COPY --from=builder ./app/static /CLIProxyAPI/static
 
 COPY config.example.yaml /CLIProxyAPI/config.example.yaml
 
@@ -31,6 +50,7 @@ WORKDIR /CLIProxyAPI
 EXPOSE 8317
 
 ENV TZ=Asia/Shanghai
+ENV MANAGEMENT_STATIC_PATH=/CLIProxyAPI/static
 
 RUN cp /usr/share/zoneinfo/${TZ} /etc/localtime && echo "${TZ}" > /etc/timezone
 

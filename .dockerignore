@@ -23,6 +23,8 @@ config.yaml
 
 # Development/editor
 bin
+management-center/node_modules
+management-center/dist
 .vscode
 .claude
 .codex

@@ -1,0 +1,36 @@
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.0
+    settings:
+      partial: false
+      depth: 0
+
+labels:
+  location: production-80
+  repo: zengwenliang416/CLIProxyAPI
+
+when:
+  - event: manual
+    branch: main
+
+concurrency:
+  limit: 1
+  group: cliproxyapi-production-80
+
+steps:
+  - name: test
+    image: golang:1.26-bookworm
+    commands:
+      - go test ./...
+      - go build -buildvcs=false -o test-output ./cmd/server
+      - test -x test-output
+
+  - name: deploy-production
+    image: docker:29-cli
+    commands:
+      - apk add --no-cache bash coreutils curl
+      - bash -n ops/woodpecker/deploy.sh
+      - bash ops/woodpecker/deploy.sh
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/cliproxyapi:/opt/cliproxyapi
