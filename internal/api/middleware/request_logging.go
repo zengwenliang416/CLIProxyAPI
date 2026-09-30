@@ -26,8 +26,9 @@ const (
 
 // RequestLoggingMiddleware creates a Gin middleware that logs HTTP requests and responses.
 // It captures detailed information about the request and response, including headers and body,
-// and uses the provided RequestLogger to record this data. When full request logging is disabled,
-// large and unknown-size bodies are spooled to disk and retained only for error logs.
+// and uses the provided RequestLogger to record this data. Large and unknown-size
+// bodies are spooled to disk so request logging does not retain unbounded bodies
+// in memory.
 func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if logger == nil {
@@ -47,7 +48,7 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		}
 
 		loggerEnabled := logger.IsEnabled()
-		captureBody := shouldCaptureRequestBody(loggerEnabled, c.Request)
+		captureBody := shouldCaptureRequestBody(c.Request)
 
 		// Capture request information
 		requestInfo, err := captureRequestInfo(c, captureBody)
@@ -65,7 +66,7 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		}
 		c.Writer = wrapper
 		attachRequestLogSources(c, logger, loggerEnabled)
-		attachDeferredRequestBodyCapture(c.Request, logger, requestInfo, loggerEnabled, captureBody)
+		attachDeferredRequestBodyCapture(c.Request, logger, requestInfo, captureBody)
 
 		// Process the request
 		c.Next()
@@ -95,8 +96,8 @@ type deferredRequestBodyCapture struct {
 	truncated     bool
 }
 
-func attachDeferredRequestBodyCapture(req *http.Request, logger logging.RequestLogger, requestInfo *RequestInfo, loggerEnabled, bodyCaptured bool) *deferredRequestBodyCapture {
-	if loggerEnabled || bodyCaptured || req == nil || req.Body == nil || req.Body == http.NoBody || req.ContentLength == 0 || requestInfo == nil {
+func attachDeferredRequestBodyCapture(req *http.Request, logger logging.RequestLogger, requestInfo *RequestInfo, bodyCaptured bool) *deferredRequestBodyCapture {
+	if bodyCaptured || req == nil || req.Body == nil || req.Body == http.NoBody || req.ContentLength == 0 || requestInfo == nil {
 		return nil
 	}
 	contentType := strings.ToLower(strings.TrimSpace(req.Header.Get("Content-Type")))
@@ -288,10 +289,7 @@ func isResponsesWebsocketUpgrade(req *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(req.Header.Get("Upgrade")), "websocket")
 }
 
-func shouldCaptureRequestBody(loggerEnabled bool, req *http.Request) bool {
-	if loggerEnabled {
-		return true
-	}
+func shouldCaptureRequestBody(req *http.Request) bool {
 	if req == nil || req.Body == nil {
 		return false
 	}

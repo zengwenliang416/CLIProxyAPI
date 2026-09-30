@@ -1,9 +1,11 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -112,6 +114,18 @@ type responsesWebsocketWriter struct {
 
 func newResponsesWebsocketWriter(conn *websocket.Conn) *responsesWebsocketWriter {
 	return &responsesWebsocketWriter{conn: conn}
+}
+
+func (w *responsesWebsocketWriter) writeText(payload []byte) error {
+	if w == nil || w.conn == nil || w.closing.Load() {
+		return net.ErrClosed
+	}
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+	if w.closing.Load() {
+		return net.ErrClosed
+	}
+	return w.conn.WriteMessage(websocket.TextMessage, payload)
 }
 
 // closeForUpstreamError sends a best-effort close frame without waiting behind
@@ -270,6 +284,7 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(h.MaxRequestBodyBytes())
 	var duplexInput <-chan cliproxyexecutor.WebsocketInput
 	if h != nil && h.Cfg != nil && h.Cfg.CodexResponseSteering {
 		socketCtx, cancelSocket := context.WithCancel(c.Request.Context())
@@ -323,7 +338,11 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 	}
 
 	var wsTerminateErr error
+	var messageRelease func()
 	defer func() {
+		if messageRelease != nil {
+			messageRelease()
+		}
 		releaseResponsesWebsocketToolCaches(downstreamSessionKey)
 		if wsTerminateErr != nil {
 			appendWebsocketTimelineDisconnect(wsTimelineLog, wsTerminateErr, time.Now())
@@ -404,18 +423,22 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 	}
 
 	for {
+		if messageRelease != nil {
+			messageRelease()
+			messageRelease = nil
+		}
 		var msgType int
-		var payload []byte
+		var messageReader io.Reader
 		var errReadMessage error
 		if duplexInput == nil {
-			msgType, payload, errReadMessage = conn.ReadMessage()
+			msgType, messageReader, errReadMessage = conn.NextReader()
 		} else {
 			select {
 			case message, ok := <-duplexInput:
 				if !ok {
 					return
 				}
-				msgType, payload, errReadMessage = websocket.TextMessage, message.Payload, message.Err
+				msgType, messageReader, errReadMessage = websocket.TextMessage, bytes.NewReader(message.Payload), message.Err
 			case <-c.Request.Context().Done():
 				return
 			}
@@ -432,6 +455,35 @@ func (h *OpenAIResponsesAPIHandler) ResponsesWebsocket(c *gin.Context) {
 		if msgType != websocket.TextMessage && msgType != websocket.BinaryMessage {
 			continue
 		}
+		payload, release, errPayload := h.ReadAdmittedPayload(c.Request.Context(), messageReader)
+		if errPayload != nil {
+			if errors.Is(errPayload, context.Canceled) {
+				wsTerminateErr = errPayload
+				return
+			}
+			if handlers.IsRequestBodyTooLarge(errPayload) {
+				wsTerminateErr = errPayload
+				_ = conn.WriteControl(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "message too big"),
+					time.Time{},
+				)
+				return
+			}
+			errorCode := "request_processing_failed"
+			if handlers.IsRequestCapacityUnavailable(errPayload) {
+				errorCode = "request_capacity_unavailable"
+			}
+			errorPayload := []byte(`{"type":"error","error":{"type":"server_error"}}`)
+			errorPayload, _ = sjson.SetBytes(errorPayload, "error.code", errorCode)
+			errorPayload, _ = sjson.SetBytes(errorPayload, "error.message", errPayload.Error())
+			if errWrite := writer.writeText(errorPayload); errWrite != nil {
+				wsTerminateErr = errWrite
+				return
+			}
+			continue
+		}
+		messageRelease = release
 		// log.Infof(
 		// 	"responses websocket: downstream_in id=%s type=%d event=%s payload=%s",
 		// 	passthroughSessionID,

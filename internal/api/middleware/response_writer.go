@@ -30,7 +30,7 @@ type RequestInfo struct {
 	Body                []byte                      // Body is the raw request body.
 	RequestID           string                      // RequestID is the unique identifier for the request.
 	Timestamp           time.Time                   // Timestamp is when the request was received.
-	deferredBodyCapture *deferredRequestBodyCapture // deferredBodyCapture spools large error-only request bodies.
+	deferredBodyCapture *deferredRequestBodyCapture // deferredBodyCapture spools large request bodies for bounded logging.
 }
 
 // ResponseWriterWrapper wraps the standard gin.ResponseWriter to intercept and log response data.
@@ -174,6 +174,7 @@ func (w *ResponseWriterWrapper) WriteHeader(statusCode int) {
 		)
 		if err == nil {
 			w.streamWriter = streamWriter
+			w.attachDeferredRequestBodyToStream(streamWriter)
 			w.chunkChannel = make(chan []byte, 100) // Buffered channel for async writes
 			doneChan := make(chan struct{})
 			w.streamDone = doneChan
@@ -188,6 +189,26 @@ func (w *ResponseWriterWrapper) WriteHeader(statusCode int) {
 
 	// Call original WriteHeader
 	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *ResponseWriterWrapper) attachDeferredRequestBodyToStream(streamWriter logging.StreamingLogWriter) {
+	if w == nil || w.requestInfo == nil || w.requestInfo.deferredBodyCapture == nil || streamWriter == nil {
+		return
+	}
+	sourceWriter, ok := streamWriter.(interface {
+		WriteRequestBodySource(*logging.FileBodySource) error
+	})
+	if !ok {
+		return
+	}
+	capture := w.requestInfo.deferredBodyCapture
+	if errFinish := capture.Finish(); errFinish != nil {
+		log.WithError(errFinish).Warn("failed to finish deferred streaming request body capture")
+		return
+	}
+	if errWrite := sourceWriter.WriteRequestBodySource(capture.source); errWrite != nil {
+		log.WithError(errWrite).Warn("failed to attach deferred request body to streaming log")
+	}
 }
 
 // ensureHeadersCaptured is a helper function to make sure response headers are captured.
