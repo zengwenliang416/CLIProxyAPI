@@ -17,7 +17,7 @@ import (
 // CodexWebsocketsExecutor executes Codex Responses requests using a WebSocket transport.
 //
 // It preserves the existing CodexExecutor HTTP implementation as a fallback for endpoints
-// not available over WebSocket (e.g. /responses/compact) and for websocket upgrade failures.
+// not available over WebSocket (e.g. /responses/compact and /decisions) and for websocket upgrade failures.
 type CodexWebsocketsExecutor struct {
 	*CodexExecutor
 

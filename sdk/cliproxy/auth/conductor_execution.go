@@ -401,7 +401,7 @@ func requestToFormat(provider string, executor ProviderExecutor, req cliproxyexe
 	if source == "openai-image" || source == "openai-video" {
 		return opts.SourceFormat
 	}
-	if opts.Alt == "responses/compact" && !opts.Stream {
+	if (opts.Alt == "responses/compact" || opts.Alt == "decisions") && !opts.Stream {
 		return sdktranslator.FormatOpenAIResponse
 	}
 	switch strings.ToLower(strings.TrimSpace(provider)) {

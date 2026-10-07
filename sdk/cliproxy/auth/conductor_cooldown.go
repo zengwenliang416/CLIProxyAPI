@@ -1926,7 +1926,9 @@ func isCountTokensEndpointNotFoundError(err error, requestedModel string) bool {
 }
 
 func isResponsesCompactRequest(opts cliproxyexecutor.Options) bool {
-	return opts.Alt == "responses/compact"
+	// Decisions uses the same JSON passthrough fault policy as compact:
+	// a 4xx from /decisions must not mark the chat model unavailable.
+	return opts.Alt == "responses/compact" || opts.Alt == "decisions"
 }
 
 func isResponsesCompactRequestFaultError(opts cliproxyexecutor.Options, err error) bool {

@@ -27,6 +27,9 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 	if opts.Alt == "responses/compact" {
 		return nil, statusErr{code: http.StatusBadRequest, msg: "streaming not supported for /responses/compact"}
 	}
+	if opts.Alt == decisionsAlt {
+		return nil, statusErr{code: http.StatusBadRequest, msg: "streaming not supported for /decisions"}
+	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 

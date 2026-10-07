@@ -25,6 +25,9 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 	if opts.Alt == "responses/compact" {
 		return e.CodexExecutor.executeCompact(ctx, auth, req, opts)
 	}
+	if opts.Alt == decisionsAlt {
+		return e.CodexExecutor.executeDecisions(ctx, auth, req, opts)
+	}
 
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 	apiKey, baseURL := codexCreds(auth)
