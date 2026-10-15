@@ -7041,3 +7041,29 @@ func TestXAIExecutorFoldsNamespaceNamedWebSearchWithoutAliasing(t *testing.T) {
 		t.Fatalf("output.0.namespace = %q, want web_search; payload=%s", got, resp.Payload)
 	}
 }
+
+func TestXAIClientVersionMeetsChatProxyFloor(t *testing.T) {
+	const floor = "1.0.13"
+	if !xaiVersionAtLeast(xaiClientVersionValue, floor) {
+		t.Fatalf("xaiClientVersionValue = %q, cli-chat-proxy rejects clients older than %s with HTTP 426", xaiClientVersionValue, floor)
+	}
+}
+
+func xaiVersionAtLeast(got, floor string) bool {
+	parse := func(v string) (major, minor, patch int, ok bool) {
+		n, err := fmt.Sscanf(v, "%d.%d.%d", &major, &minor, &patch)
+		return major, minor, patch, err == nil && n == 3
+	}
+	gotMajor, gotMinor, gotPatch, gotOK := parse(got)
+	floorMajor, floorMinor, floorPatch, floorOK := parse(floor)
+	if !gotOK || !floorOK {
+		return false
+	}
+	if gotMajor != floorMajor {
+		return gotMajor > floorMajor
+	}
+	if gotMinor != floorMinor {
+		return gotMinor > floorMinor
+	}
+	return gotPatch >= floorPatch
+}

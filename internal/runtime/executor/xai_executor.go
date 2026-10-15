@@ -48,8 +48,9 @@ const (
 	xaiTokenAuthHeader          = "X-XAI-Token-Auth"
 	xaiTokenAuthValue           = "xai-grok-cli"
 	xaiClientVersionHeader      = "x-grok-client-version"
-	// Keep in sync with the current Grok CLI client version that chat-proxy expects.
-	xaiClientVersionValue         = "0.2.120"
+	// Keep in sync with https://x.ai/cli/stable. cli-chat-proxy.grok.com
+	// rejects older clients with HTTP 426; the floor was 1.0.13 as of 2026-10-01.
+	xaiClientVersionValue         = "1.0.52"
 	xaiClientIdentifierHeader     = "x-grok-client-identifier"
 	xaiClientIdentifierValue      = "grok-shell"
 	xaiAuthenticateResponseHeader = "x-authenticateresponse"
