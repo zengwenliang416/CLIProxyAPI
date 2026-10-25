@@ -11,8 +11,6 @@ labels:
 
 when:
   - event: pull_request
-  - event: push
-    branch: main
 
 concurrency:
   limit: 1
