@@ -14,7 +14,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 )
+
+// MaxRequestBodyBytesContextKey carries the upstream request-size policy.
+const MaxRequestBodyBytesContextKey = "maxRequestBodyBytes"
 
 const DefaultMaxDecodedRequestBodyBytes int64 = 80 << 20
 
@@ -39,7 +43,7 @@ func IsRequestBodyTooLarge(err error) bool {
 
 // WriteRequestBodyError writes the protocol-neutral invalid request response.
 func WriteRequestBodyError(c *gin.Context, err error) {
-	status := http.StatusBadRequest
+	status := clienterror.HTTPStatusFromErrorOr(err, http.StatusBadRequest)
 	errType := "invalid_request_error"
 	errCode := ""
 	if IsRequestCapacityUnavailable(err) {
@@ -65,20 +69,25 @@ func WriteRequestBodyError(c *gin.Context, err error) {
 // ReadRequestBody reads the incoming request body and decodes supported
 // Content-Encoding values before handlers inspect JSON fields.
 func ReadRequestBody(c *gin.Context) ([]byte, error) {
-	return readRequestBody(c, DefaultMaxDecodedRequestBodyBytes, DefaultLargeRequestThresholdBytes, nil)
+	limit := DefaultMaxDecodedRequestBodyBytes
+	if c != nil {
+		if upstreamLimit := c.GetInt64(MaxRequestBodyBytesContextKey); upstreamLimit > 0 {
+			limit = min(limit, upstreamLimit)
+		}
+	}
+	return readRequestBody(c, limit, min(DefaultLargeRequestThresholdBytes, limit), nil)
 }
 
 // ReadRequestBody applies the handler's configured decoded body limit.
 func (h *BaseAPIHandler) ReadRequestBody(c *gin.Context) ([]byte, error) {
 	limit := h.MaxRequestBodyBytes()
-	threshold := h.LargeRequestThresholdBytes()
-	var admission *RequestAdmissionController
-	if h != nil {
-		if h.requestAdmission == nil {
-			h.requestAdmission = NewRequestAdmissionController(h.Cfg)
+	if c != nil {
+		if upstreamLimit := c.GetInt64(MaxRequestBodyBytesContextKey); upstreamLimit > 0 {
+			limit = min(limit, upstreamLimit)
 		}
-		admission = h.requestAdmission
 	}
+	threshold := h.LargeRequestThresholdBytes()
+	admission := h.requestAdmissionController()
 	return readRequestBody(c, limit, threshold, admission)
 }
 
@@ -223,7 +232,7 @@ func decodeZstdRequestBodySpool(raw *requestBodySpool, limit, memoryThreshold in
 
 	decoded, err := spoolRequestBody(nil, decoder, limit, memoryThreshold)
 	if err != nil {
-		if IsRequestBodyTooLarge(err) || strings.Contains(strings.ToLower(err.Error()), "decompressed size exceeds configured limit") {
+		if IsRequestBodyTooLarge(err) || errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, zstd.ErrDecoderSizeExceeded) {
 			return nil, &RequestBodyTooLargeError{Limit: limit}
 		}
 		return nil, fmt.Errorf("failed to decode zstd request body: %w", err)

@@ -86,8 +86,8 @@ func NewRequestAdmissionController(cfg *config.SDKConfig) *RequestAdmissionContr
 
 // MaxRequestBodyBytes returns the effective absolute request-body limit.
 func (h *BaseAPIHandler) MaxRequestBodyBytes() int64 {
-	if h != nil && h.Cfg != nil && h.Cfg.MaxDecodedRequestBodyBytes > 0 {
-		return h.Cfg.MaxDecodedRequestBodyBytes
+	if cfg := h.CurrentConfig(); cfg != nil && cfg.MaxDecodedRequestBodyBytes > 0 {
+		return cfg.MaxDecodedRequestBodyBytes
 	}
 	return DefaultMaxDecodedRequestBodyBytes
 }
@@ -95,8 +95,8 @@ func (h *BaseAPIHandler) MaxRequestBodyBytes() int64 {
 // LargeRequestThresholdBytes returns the effective admission threshold.
 func (h *BaseAPIHandler) LargeRequestThresholdBytes() int64 {
 	limit := h.MaxRequestBodyBytes()
-	if h != nil && h.Cfg != nil && h.Cfg.LargeRequestThresholdBytes > 0 {
-		return min(h.Cfg.LargeRequestThresholdBytes, limit)
+	if cfg := h.CurrentConfig(); cfg != nil && cfg.LargeRequestThresholdBytes > 0 {
+		return min(cfg.LargeRequestThresholdBytes, limit)
 	}
 	return min(DefaultLargeRequestThresholdBytes, limit)
 }
@@ -106,10 +106,20 @@ func (h *BaseAPIHandler) AcquireRequestCapacity(ctx context.Context, size int64)
 	if h == nil {
 		return func() {}, nil
 	}
+	return h.requestAdmissionController().Acquire(ctx, size)
+}
+
+// requestAdmissionController returns the shared admission policy under the runtime lock.
+func (h *BaseAPIHandler) requestAdmissionController() *RequestAdmissionController {
+	if h == nil {
+		return nil
+	}
+	h.runtimeMu.Lock()
+	defer h.runtimeMu.Unlock()
 	if h.requestAdmission == nil {
 		h.requestAdmission = NewRequestAdmissionController(h.Cfg)
 	}
-	return h.requestAdmission.Acquire(ctx, size)
+	return h.requestAdmission
 }
 
 // Update applies hot-reloaded limits and wakes waiters that now fit.
