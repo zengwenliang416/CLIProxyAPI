@@ -87,7 +87,8 @@ require_file "${root}/config.yaml"
 [[ -d "${root}/plugins" ]] || fail "plugins directory is missing"
 docker network inspect "${network}" >/dev/null
 
-auth_count_before="$(find "${root}/auth" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+# Credential storage creates .lock sidecars during refresh; only JSON files are accounts.
+auth_count_before="$(find "${root}/auth" -maxdepth 1 -type f -iname '*.json' | wc -l | tr -d ' ')"
 plugin_count_before="$(find "${root}/plugins" -type f | wc -l | tr -d ' ')"
 [[ "${auth_count_before}" -gt 0 ]] || fail "no authentication files were found"
 
@@ -214,7 +215,7 @@ management_status="$(docker run --rm --network "container:${container}" curlimag
 docker run --rm --network "container:${container}" curlimages/curl:8.16.0 \
   --fail --silent --show-error --max-time 5 http://127.0.0.1:8317/management.html >/dev/null
 
-auth_count_after="$(docker exec "${container}" sh -c 'find /root/.cli-proxy-api -maxdepth 1 -type f | wc -l' | tr -d ' ')"
+auth_count_after="$(docker exec "${container}" sh -c 'find /root/.cli-proxy-api -maxdepth 1 -type f -iname "*.json" | wc -l' | tr -d ' ')"
 plugin_count_after="$(docker exec "${container}" sh -c 'find /CLIProxyAPI/plugins -type f | wc -l' | tr -d ' ')"
 [[ "${auth_count_after}" == "${auth_count_before}" ]] || fail "authentication file count changed"
 [[ "${plugin_count_after}" == "${plugin_count_before}" ]] || fail "plugin file count changed"
