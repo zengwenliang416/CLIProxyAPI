@@ -498,7 +498,7 @@ func TestResponsesWebsocketInputPreservesAdmissionOwnership(t *testing.T) {
 		defer conn.Close()
 		ctx, cancel := context.WithCancelCause(r.Context())
 		defer cancel(nil)
-		input, done := readResponsesWebsocketInput(ctx, cancel, conn, func([]byte) error { interrupted <- struct{}{}; return nil }, newResponsesLocalInterrupt(), newResponsesWebsocketWriter(conn), nil,
+		input, done := readResponsesWebsocketInput(ctx, cancel, conn, func([]byte) error { interrupted <- struct{}{}; return nil }, newResponsesLocalInterrupt(), newResponsesWebsocketWriter(conn), nil, nil,
 			func(ctx context.Context, reader io.Reader) ([]byte, func(), error) {
 				payload, release, err := base.ReadAdmittedPayload(ctx, reader)
 				if err != nil {
