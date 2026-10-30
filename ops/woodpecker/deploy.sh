@@ -95,7 +95,7 @@ plugin_count_before="$(find "${root}/plugins" -type f | wc -l | tr -d ' ')"
 log "building ${image}"
 docker build \
   --build-arg "VERSION=ci-${short_sha}" \
-  --build-arg "MANAGEMENT_VERSION=v1.25.0-owned-${short_sha}" \
+  --build-arg "MANAGEMENT_VERSION=v1.26.7-64b4f5ae-owned-${short_sha}" \
   --build-arg "COMMIT=${short_sha}" \
   --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --tag "${image}" \

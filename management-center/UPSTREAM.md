@@ -4,10 +4,10 @@ This directory vendors the open-source CLIProxyAPI management center so the
 panel version is controlled by this repository.
 
 - Upstream repository: https://github.com/router-for-me/Cli-Proxy-API-Management-Center
-- Imported commit: `b87b9487f63e08ad97b1fb4e7c17b4adb811b922`
-- Imported on: 2026-09-30
-- Management center release: `v1.25.0`
-- Backend baseline: CLIProxyAPI `v8.0.4`, `d33f63f8e3d98428440ebca5a5b6a981a61ff71e`
+- Imported commit: `64b4f5aed19b8f791eb21eb9e785ea379ea05b44`
+- Imported on: 2026-10-30
+- Management center release: `v1.26.7`, plus 3 commits on main after that tag
+- Backend baseline: CLIProxyAPI `v8.0.47`, `90c447d3a8727d115aa7552ec93ce023736ed492`
 - License: MIT, see `LICENSE`
 
 The Docker build runs `bun install --frozen-lockfile` and `bun run build`, then

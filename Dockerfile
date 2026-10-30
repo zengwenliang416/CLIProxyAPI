@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14 AS management-center-builder
+FROM oven/bun:1.4.3 AS management-center-builder
 
 WORKDIR /app/management-center
 
@@ -8,7 +8,7 @@ RUN bun install --frozen-lockfile
 
 COPY management-center/ .
 
-ARG MANAGEMENT_VERSION=v1.25.0-owned
+ARG MANAGEMENT_VERSION=v1.26.7-64b4f5ae-owned
 
 RUN VERSION="${MANAGEMENT_VERSION}" bun run build \
     && mkdir -p /out \

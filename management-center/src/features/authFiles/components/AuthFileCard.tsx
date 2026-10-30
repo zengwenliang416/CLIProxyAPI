@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react';
+import { getAuthFileRefreshKey } from '@/features/authFiles/manualRefresh';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -15,7 +16,7 @@ import {
 import { ProviderStatusBar } from '@/components/providers/ProviderStatusBar';
 import type { AuthFileItem } from '@/types';
 import { statusBarDataFromRecentRequests } from '@/utils/recentRequests';
-import { formatFileSize } from '@/utils/format';
+import { formatDateTimeValue, formatFileSize } from '@/utils/format';
 import {
   formatModified,
   getAuthFileStatusMessage,
@@ -33,6 +34,8 @@ import { resolveAuthFileQuotaType } from '@/features/authFiles/logic';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
 import { AuthFileCooldownSection } from './AuthFileCooldownSection';
+import { getSiwcBindingStatus, supportsSiwcBinding } from '@/features/oauth/siwcBinding';
+import { SiwcStatusBadge } from '@/features/oauth/components/SiwcStatusBadge';
 import styles from './AuthFileCard.module.scss';
 
 export type AuthFileCardProps = {
@@ -47,7 +50,7 @@ export type AuthFileCardProps = {
   cooldownResetting: Record<string, boolean>;
   quotaFilterType: AuthFileQuotaFilter;
   statusBarCache: Map<string, AuthFileStatusBarData>;
-  /** 首屏一次性级联入场的延迟；null/undefined 表示不做入场动画。 */
+  /** One-time entrance delay; null/undefined disables entrance motion. */
   entranceDelayMs?: number | null;
   onShowModels: (file: AuthFileItem) => void;
   onDownload: (name: string) => void;
@@ -60,7 +63,7 @@ export type AuthFileCardProps = {
 };
 
 export function AuthFileCard(props: AuthFileCardProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const {
     file,
     compact,
@@ -89,7 +92,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
   const isAistudio = providerKey === 'aistudio';
   const showModelsButton = !isRuntimeOnly || isAistudio;
   const showManualRefreshButton = !isRuntimeOnly && supportsAuthFileManualRefresh(providerKey);
-  const isManualRefreshing = manualRefreshing[file.name] === true;
+  const isManualRefreshing = manualRefreshing[getAuthFileRefreshKey(file)] === true;
   const typeLabel = getTypeLabel(t, providerKey);
   const typeColor = getTypeColor(providerKey, resolvedTheme);
 
@@ -110,10 +113,13 @@ export function AuthFileCard(props: AuthFileCardProps) {
   const priorityValue = Number.isSafeInteger(file.priority) ? file.priority : undefined;
   const weightValue = Number.isSafeInteger(file.weight) ? file.weight : undefined;
   const noteValue = typeof file.note === 'string' ? file.note.trim() : '';
-  // 主行显示账号（email/项目 ID），文件名降为满卡宽的 mono 副行
+  // Lead with account identity and use the file name as secondary text.
   const identity = deriveAuthFileIdentity(file);
+  const siwcExpires = file.siwcExpiresAt
+    ? formatDateTimeValue(file.siwcExpiresAt, i18n.language)
+    : '';
 
-  // 挂载时捕获一次入场延迟：父级随后传 null 也不会中断已开始的动画
+  // Capture the entrance delay once so subsequent updates do not interrupt it.
   const [mountEntranceDelayMs] = useState<number | null>(entranceDelayMs ?? null);
   const cardClasses = [
     styles.card,
@@ -186,7 +192,11 @@ export function AuthFileCard(props: AuthFileCardProps) {
       <AuthFileCooldownSection
         snapshot={file.cooldownSnapshot}
         resetting={isCooldownResetting}
-        resetDisabled={disableControls || statusUpdating[file.name] === true || isManualRefreshing}
+        resetDisabled={
+          disableControls ||
+          statusUpdating[getAuthFileRefreshKey(file)] === true ||
+          isManualRefreshing
+        }
         onReset={authIndexKey ? () => onCooldownReset(file) : undefined}
       />
 
@@ -241,6 +251,17 @@ export function AuthFileCard(props: AuthFileCardProps) {
         )}
       </div>
 
+      {supportsSiwcBinding(file) && (
+        <div className={styles.siwcRow}>
+          <SiwcStatusBadge status={getSiwcBindingStatus(file)} />
+          {siwcExpires && (
+            <span className={styles.siwcExpires} title={file.siwcExpiresAt}>
+              {t('siwc.expires', { date: siwcExpires })}
+            </span>
+          )}
+        </div>
+      )}
+
       {showQuotaLayout && quotaType && (
         <AuthFileQuotaSection file={file} quotaType={quotaType} disableControls={disableControls} />
       )}
@@ -271,7 +292,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
                   disabled={
                     disableControls ||
                     file.disabled ||
-                    statusUpdating[file.name] === true ||
+                    statusUpdating[getAuthFileRefreshKey(file)] === true ||
                     isManualRefreshing
                   }
                 >
@@ -317,7 +338,11 @@ export function AuthFileCard(props: AuthFileCardProps) {
             <ToggleSwitch
               ariaLabel={t('auth_files.card_toggle', { name: file.name })}
               checked={!file.disabled}
-              disabled={disableControls || statusUpdating[file.name] === true || isManualRefreshing}
+              disabled={
+                disableControls ||
+                statusUpdating[getAuthFileRefreshKey(file)] === true ||
+                isManualRefreshing
+              }
               onChange={(value) => onToggleStatus(file, value)}
             />
           </div>
