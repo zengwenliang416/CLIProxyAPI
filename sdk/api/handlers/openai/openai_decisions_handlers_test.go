@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/klauspost/compress/zstd"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
@@ -16,7 +17,6 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
-	"github.com/tidwall/gjson"
 )
 
 type decisionsCaptureExecutor struct {
@@ -92,7 +92,7 @@ func TestOpenAIResponsesDecisionsExecute(t *testing.T) {
 	if executor.sourceFormat != "openai-response" {
 		t.Fatalf("source format = %q", executor.sourceFormat)
 	}
-	if gjson.GetBytes(executor.payload, "questions.0.id").String() != "department" {
+	if ojson.GetBytes(executor.payload, "questions.0.id").String() != "department" {
 		t.Fatalf("questions not forwarded: %s", executor.payload)
 	}
 	if strings.TrimSpace(resp.Body.String()) != `{"ok":true}` {

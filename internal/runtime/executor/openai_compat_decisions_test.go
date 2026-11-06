@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 func TestOpenAICompatExecutorDecisionsPassthrough(t *testing.T) {
@@ -56,13 +56,13 @@ func TestOpenAICompatExecutorDecisionsPassthrough(t *testing.T) {
 	if gotPath != "/v1/decisions" {
 		t.Fatalf("path = %q, want /v1/decisions", gotPath)
 	}
-	if gjson.GetBytes(gotBody, "model").String() != "gpt-6-luna" {
-		t.Fatalf("model = %s", gjson.GetBytes(gotBody, "model").Raw)
+	if ojson.GetBytes(gotBody, "model").String() != "gpt-6-luna" {
+		t.Fatalf("model = %s", ojson.GetBytes(gotBody, "model").Raw)
 	}
-	if !gjson.GetBytes(gotBody, "input").Exists() || !gjson.GetBytes(gotBody, "questions").Exists() {
+	if !ojson.GetBytes(gotBody, "input").Exists() || !ojson.GetBytes(gotBody, "questions").Exists() {
 		t.Fatalf("input or questions dropped: %s", gotBody)
 	}
-	if gjson.GetBytes(gotBody, "messages").Exists() || gjson.GetBytes(gotBody, "prompt_cache_key").Exists() || gjson.GetBytes(gotBody, "stream").Exists() {
+	if ojson.GetBytes(gotBody, "messages").Exists() || ojson.GetBytes(gotBody, "prompt_cache_key").Exists() || ojson.GetBytes(gotBody, "stream").Exists() {
 		t.Fatalf("translated or cache fields injected: %s", gotBody)
 	}
 	if string(resp.Payload) != `{"id":"dec_1","object":"decision","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}` {

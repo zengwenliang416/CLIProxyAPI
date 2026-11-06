@@ -8,11 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
-	"github.com/tidwall/gjson"
 )
 
 func TestCodexExecutorDecisionsPassthrough(t *testing.T) {
@@ -52,20 +52,20 @@ func TestCodexExecutorDecisionsPassthrough(t *testing.T) {
 	if gotAccept != "application/json" {
 		t.Fatalf("Accept = %q, want application/json", gotAccept)
 	}
-	if gjson.GetBytes(gotBody, "model").String() != "gpt-6-luna" {
-		t.Fatalf("model = %s, body=%s", gjson.GetBytes(gotBody, "model").Raw, gotBody)
+	if ojson.GetBytes(gotBody, "model").String() != "gpt-6-luna" {
+		t.Fatalf("model = %s, body=%s", ojson.GetBytes(gotBody, "model").Raw, gotBody)
 	}
-	if gjson.GetBytes(gotBody, "input").String() != "I was charged twice." {
-		t.Fatalf("input = %s", gjson.GetBytes(gotBody, "input").Raw)
+	if ojson.GetBytes(gotBody, "input").String() != "I was charged twice." {
+		t.Fatalf("input = %s", ojson.GetBytes(gotBody, "input").Raw)
 	}
-	if gjson.GetBytes(gotBody, "questions.0.id").String() != "department" {
+	if ojson.GetBytes(gotBody, "questions.0.id").String() != "department" {
 		t.Fatalf("questions changed: %s", gotBody)
 	}
-	if gjson.GetBytes(gotBody, "metadata.source").String() != "client" {
+	if ojson.GetBytes(gotBody, "metadata.source").String() != "client" {
 		t.Fatalf("metadata changed: %s", gotBody)
 	}
 	for _, field := range []string{"stream", "prompt_cache_key", "instructions", "tools"} {
-		if gjson.GetBytes(gotBody, field).Exists() {
+		if ojson.GetBytes(gotBody, field).Exists() {
 			t.Fatalf("field %s was injected: %s", field, gotBody)
 		}
 	}

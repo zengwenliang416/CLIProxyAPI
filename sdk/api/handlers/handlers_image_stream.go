@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/interfaces"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
-	"github.com/tidwall/gjson"
 )
 
 var errImageStreamMissingFinal = errors.New("upstream image stream closed before final image")
@@ -57,7 +57,7 @@ func (s *imageSSECompletionState) observeFrame(frame []byte) {
 		return
 	}
 
-	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	eventType := strings.TrimSpace(ojson.GetBytes(payload, "type").String())
 	if eventType == "" {
 		eventType = sseEventName(frame)
 	}
@@ -65,8 +65,8 @@ func (s *imageSSECompletionState) observeFrame(frame []byte) {
 		return
 	}
 
-	if strings.TrimSpace(gjson.GetBytes(payload, "b64_json").String()) != "" ||
-		strings.TrimSpace(gjson.GetBytes(payload, "url").String()) != "" {
+	if strings.TrimSpace(ojson.GetBytes(payload, "b64_json").String()) != "" ||
+		strings.TrimSpace(ojson.GetBytes(payload, "url").String()) != "" {
 		s.completed = true
 	}
 }

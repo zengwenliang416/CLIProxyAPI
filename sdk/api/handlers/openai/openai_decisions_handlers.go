@@ -5,10 +5,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
-	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const openAIDecisionsAlt = "decisions"
@@ -33,31 +32,31 @@ func (h *OpenAIResponsesAPIHandler) Decisions(c *gin.Context) {
 	}
 	defer handlers.ReleaseRequestBody(c)
 
-	if !gjson.ValidBytes(rawJSON) || !gjson.ParseBytes(rawJSON).IsObject() {
+	if !ojson.ValidBytes(rawJSON) || !ojson.ParseBytes(rawJSON).IsObject() {
 		writeDecisionsInvalidRequest(c, "Invalid JSON body")
 		return
 	}
-	if gjson.GetBytes(rawJSON, "stream").Type == gjson.True {
+	if ojson.GetBytes(rawJSON, "stream").Type == ojson.True {
 		writeDecisionsInvalidRequest(c, "Streaming is not supported for the Decisions API")
 		return
 	}
-	model := gjson.GetBytes(rawJSON, "model")
-	if model.Type != gjson.String || strings.TrimSpace(model.String()) == "" {
+	model := ojson.GetBytes(rawJSON, "model")
+	if model.Type != ojson.String || strings.TrimSpace(model.String()) == "" {
 		writeDecisionsInvalidRequest(c, "Missing required parameter: 'model'")
 		return
 	}
-	input := gjson.GetBytes(rawJSON, "input")
-	if !input.Exists() || input.Type == gjson.Null {
+	input := ojson.GetBytes(rawJSON, "input")
+	if !input.Exists() || input.Type == ojson.Null {
 		writeDecisionsInvalidRequest(c, "Missing required parameter: 'input'")
 		return
 	}
-	questions := gjson.GetBytes(rawJSON, "questions")
+	questions := ojson.GetBytes(rawJSON, "questions")
 	if !questions.IsArray() || len(questions.Array()) == 0 {
 		writeDecisionsInvalidRequest(c, "Missing required parameter: 'questions'")
 		return
 	}
-	if gjson.GetBytes(rawJSON, "stream").Exists() {
-		if updated, errDelete := sjson.DeleteBytes(rawJSON, "stream"); errDelete == nil {
+	if ojson.GetBytes(rawJSON, "stream").Exists() {
+		if updated, errDelete := ojson.DeleteBytes(rawJSON, "stream"); errDelete == nil {
 			rawJSON = updated
 		}
 	}

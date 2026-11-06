@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	log "github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
 )
 
 func (e *OpenAICompatExecutor) executeDecisions(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
@@ -23,7 +23,7 @@ func (e *OpenAICompatExecutor) executeDecisions(ctx context.Context, auth *clipr
 	}
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 	if strings.TrimSpace(baseModel) == "" {
-		baseModel = gjson.GetBytes(body, "model").String()
+		baseModel = ojson.GetBytes(body, "model").String()
 	}
 
 	baseURL, apiKey := e.resolveCredentials(auth)
