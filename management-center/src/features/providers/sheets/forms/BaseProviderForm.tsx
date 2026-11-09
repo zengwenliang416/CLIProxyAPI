@@ -30,7 +30,11 @@ import type {
   ProviderEntryFormInput,
   ProviderResource,
 } from '../../types';
-import { useConnectivityTest, type ConnectivityErrorMessages } from './useConnectivityTest';
+import {
+  pickConnectivityModel,
+  useConnectivityTest,
+  type ConnectivityErrorMessages,
+} from './useConnectivityTest';
 import { useModelDiscovery } from './useModelDiscovery';
 import { ModelDiscoveryPanel } from './ModelDiscoveryPanel';
 import { ConnectivityStatusIcon } from './ConnectivityStatusIcon';
@@ -318,7 +322,7 @@ export function BaseProviderForm({
       seen.add(name);
       names.push(name);
     });
-    const firstName = names[0];
+    const firstName = pickConnectivityModel('', form.models);
     const autoLabel = firstName
       ? t('providersPage.form.testModelAutoWith', { name: firstName })
       : t('providersPage.form.testModelAutoEmpty');

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiCallApi, getApiCallErrorMessage } from '@/services/api';
+import { apiCallApi, getApiCallErrorMessage, type ApiCallResult } from '@/services/api';
 import {
   buildCodexResponsesEndpoint,
   buildClaudeMessagesEndpoint,
@@ -15,6 +15,62 @@ import type { ApiKeyEntryInput, ModelEntryInput, ProviderBrand } from '../../typ
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01';
+const OPENAI_PROBE_TOKEN_LIMIT = 5;
+
+const NON_CHAT_PROBE_MARKERS = [
+  'tts',
+  'whisper',
+  'transcribe',
+  'dall-e',
+  'gpt-image',
+  'embedding',
+  'moderation',
+  'realtime',
+  'sora',
+];
+
+export const isOfficialOpenAIBaseURL = (baseUrl: string): boolean => {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return false;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    return new URL(withScheme).hostname.toLowerCase() === 'api.openai.com';
+  } catch {
+    return false;
+  }
+};
+
+export const isNonChatProbeModel = (name: string): boolean => {
+  const id = name.trim().toLowerCase();
+  if (!id) return true;
+  return NON_CHAT_PROBE_MARKERS.some((marker) => id.includes(marker));
+};
+
+const modelUsesMaxCompletionTokens = (model: string, models: ModelEntryInput[]): boolean => {
+  const trimmed = model.trim().toLowerCase();
+  if (!trimmed) return false;
+  return models.some((entry) => {
+    if (entry.useMaxCompletionTokens !== true) return false;
+    const name = (entry.name ?? '').trim().toLowerCase();
+    const alias = (entry.alias ?? '').trim().toLowerCase();
+    return name === trimmed || (alias !== '' && alias === trimmed);
+  });
+};
+
+const openAIProbeBody = (model: string, useMaxCompletionTokens: boolean) => ({
+  model,
+  messages: [{ role: 'user', content: 'Hi' }],
+  stream: false,
+  ...(useMaxCompletionTokens
+    ? { max_completion_tokens: OPENAI_PROBE_TOKEN_LIMIT }
+    : { max_tokens: OPENAI_PROBE_TOKEN_LIMIT }),
+});
+
+const upstreamWantsMaxCompletionTokens = (result: ApiCallResult): boolean => {
+  if (result.statusCode !== 400) return false;
+  const message = getApiCallErrorMessage(result);
+  return message.includes('max_tokens') && message.includes('max_completion_tokens');
+};
 
 export type ConnectivityState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -37,14 +93,20 @@ const requestFailureMessage = (err: unknown, messages: ConnectivityErrorMessages
   return isTimeout ? messages.timeout(DEFAULT_TIMEOUT_MS / 1000) : raw || messages.requestFailed;
 };
 
-const pickModel = (testModel: string | undefined, models: ModelEntryInput[]): string => {
+export const pickConnectivityModel = (
+  testModel: string | undefined,
+  models: ModelEntryInput[]
+): string => {
   const trimmed = (testModel ?? '').trim();
   if (trimmed) return trimmed;
+  let fallback = '';
   for (const m of models) {
     const name = (m.name ?? '').trim();
-    if (name) return name;
+    if (!name) continue;
+    if (!fallback) fallback = name;
+    if (!isNonChatProbeModel(name)) return name;
   }
-  return '';
+  return fallback;
 };
 
 const resolveBearerToken = (headers: Record<string, string>): string => {
@@ -214,7 +276,7 @@ export function useConnectivityTest(
         });
         return false;
       }
-      const model = pickModel(testModel, models);
+      const model = pickConnectivityModel(testModel, models);
       if (!model) {
         updateOpenaiStatus(idx, {
           state: 'error',
@@ -222,6 +284,8 @@ export function useConnectivityTest(
         });
         return false;
       }
+      const useMaxCompletionTokens =
+        isOfficialOpenAIBaseURL(trimmedBase) || modelUsesMaxCompletionTokens(model, models);
 
       const headerObj: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -235,25 +299,26 @@ export function useConnectivityTest(
         }
       }
 
-      updateOpenaiStatus(idx, { state: 'loading', message: '' });
-      setInFlight((n) => n + 1);
-      try {
-        const result = await apiCallApi.request(
+      const sendProbe = (maxCompletionTokens: boolean) =>
+        apiCallApi.request(
           {
             authIndex: resolvedAuthIndex,
             proxy_url: entry?.proxyUrl?.trim() || undefined,
             method: 'POST',
             url: endpoint,
             header: headerObj,
-            data: JSON.stringify({
-              model,
-              messages: [{ role: 'user', content: 'Hi' }],
-              stream: false,
-              max_tokens: 5,
-            }),
+            data: JSON.stringify(openAIProbeBody(model, maxCompletionTokens)),
           },
           { timeout: DEFAULT_TIMEOUT_MS }
         );
+
+      updateOpenaiStatus(idx, { state: 'loading', message: '' });
+      setInFlight((n) => n + 1);
+      try {
+        let result = await sendProbe(useMaxCompletionTokens);
+        if (!useMaxCompletionTokens && upstreamWantsMaxCompletionTokens(result)) {
+          result = await sendProbe(true);
+        }
         if (result.statusCode < 200 || result.statusCode >= 300) {
           throw new Error(getApiCallErrorMessage(result));
         }
@@ -304,7 +369,7 @@ export function useConnectivityTest(
       return;
     }
 
-    const model = pickModel(testModel, models);
+    const model = pickConnectivityModel(testModel, models);
     if (!model) {
       setCodexStatus({ state: 'error', message: messages.modelRequired });
       return;
@@ -380,7 +445,7 @@ export function useConnectivityTest(
   const runGemini = useCallback(async (): Promise<void> => {
     if (brand !== 'gemini' && brand !== 'interactions') return;
 
-    const model = pickModel(testModel, models);
+    const model = pickConnectivityModel(testModel, models);
     if (!model) {
       setGeminiStatus({ state: 'error', message: messages.modelRequired });
       return;
@@ -476,7 +541,7 @@ export function useConnectivityTest(
       setClaudeStatus({ state: 'error', message: messages.endpointInvalid });
       return;
     }
-    const model = pickModel(testModel, models);
+    const model = pickConnectivityModel(testModel, models);
     if (!model) {
       setClaudeStatus({ state: 'error', message: messages.modelRequired });
       return;

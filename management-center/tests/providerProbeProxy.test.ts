@@ -6,6 +6,7 @@ import { apiCallApi, type ApiCallRequest } from '../src/services/api/apiCall';
 import { normalizeProviderGroups } from '../src/services/api/transformers';
 import type { ProviderKeyConfig } from '../src/types/provider';
 import {
+  pickConnectivityModel,
   useConnectivityTest,
   type UseConnectivityTestArgs,
   type ConnectivityErrorMessages,
@@ -113,6 +114,66 @@ describe('provider probe proxy forwarding', () => {
     expect(requests[0].header?.Authorization).toBe('Bearer fixture-key');
     expect(requests[1].header).toBeUndefined();
     expect(requests[1].authIndex).toBeUndefined();
+  });
+
+  test('official OpenAI probe sends max_completion_tokens and skips non-chat models', async () => {
+    requestSpy = spyOn(apiCallApi, 'request').mockResolvedValue(success);
+    const models = [
+      { name: 'tts-1', alias: '' },
+      { name: 'gpt-5', alias: '' },
+    ];
+    const hook = captureHook(() =>
+      useConnectivityTest(
+        {
+          ...args,
+          brand: 'openaiCompatibility',
+          baseUrl: 'https://api.openai.com/v1',
+          models,
+          apiKeyEntries: [{ apiKey: 'fixture-key', proxyUrl: '' }],
+        },
+        messages
+      )
+    );
+    expect(pickConnectivityModel('', models)).toBe('gpt-5');
+    await hook.runOpenAIKey(0);
+    const body = JSON.parse(String(requestSpy?.mock.calls[0][0].data));
+    expect(body).toMatchObject({ model: 'gpt-5', max_completion_tokens: 5 });
+    expect(body.max_tokens).toBeUndefined();
+  });
+
+  test('third-party probe retries once when upstream rejects max_tokens', async () => {
+    const bodies: string[] = [];
+    requestSpy = spyOn(apiCallApi, 'request').mockImplementation(async (request) => {
+      bodies.push(String(request.data ?? ''));
+      if (bodies.length === 1) {
+        return {
+          statusCode: 400,
+          header: {},
+          bodyText: '',
+          body: {
+            error: {
+              message:
+                "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+            },
+          },
+        };
+      }
+      return success;
+    });
+    const hook = captureHook(() =>
+      useConnectivityTest(
+        {
+          ...args,
+          brand: 'openaiCompatibility',
+          apiKeyEntries: [{ apiKey: 'fixture-key', proxyUrl: '' }],
+        },
+        messages
+      )
+    );
+    await expect(hook.runOpenAIKey(0)).resolves.toBe(true);
+    expect(JSON.parse(bodies[0])).toMatchObject({ max_tokens: 5 });
+    expect(JSON.parse(bodies[1])).toMatchObject({ max_completion_tokens: 5 });
+    expect(JSON.parse(bodies[1]).max_tokens).toBeUndefined();
   });
 
   test('base and sponsor forms pass their editable proxy to probe hooks', () => {
