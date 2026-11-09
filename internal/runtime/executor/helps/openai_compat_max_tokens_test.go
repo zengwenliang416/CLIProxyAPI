@@ -28,9 +28,18 @@ func TestShouldUseMaxCompletionTokensForModel(t *testing.T) {
 		},
 	}
 
+	official := &config.OpenAICompatibility{
+		BaseURL: "https://api.openai.com/v1",
+		Models: []config.OpenAICompatibilityModel{
+			{Name: "gpt-5", Alias: "gpt-5"},
+			{Name: "tts-1", Alias: "tts-1", UseMaxCompletionTokens: false},
+		},
+	}
+
 	tests := []struct {
 		name           string
 		compat         *config.OpenAICompatibility
+		baseURL        string
 		upstreamModel  string
 		requestedModel string
 		want           bool
@@ -98,11 +107,41 @@ func TestShouldUseMaxCompletionTokensForModel(t *testing.T) {
 			requestedModel: "unknown-alias",
 			want:           false,
 		},
+		{
+			name:           "official openai uses max_completion_tokens without a per-model flag",
+			compat:         official,
+			upstreamModel:  "gpt-5",
+			requestedModel: "gpt-5",
+			want:           true,
+		},
+		{
+			name:           "official openai ignores an explicit false flag",
+			compat:         official,
+			upstreamModel:  "tts-1",
+			requestedModel: "tts-1",
+			want:           true,
+		},
+		{
+			name:           "request base url identifies official openai when compat has no base url",
+			compat:         compat,
+			baseURL:        "https://api.openai.com/v1/",
+			upstreamModel:  "deepseek/v3",
+			requestedModel: "deepseek-chat",
+			want:           true,
+		},
+		{
+			name:           "lookalike host stays on max_tokens",
+			compat:         compat,
+			baseURL:        "https://api.openai.com.evil/v1",
+			upstreamModel:  "legacy/gpt-3.5",
+			requestedModel: "gpt-3.5",
+			want:           false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ShouldUseMaxCompletionTokensForModel(tt.compat, tt.upstreamModel, tt.requestedModel)
+			got := ShouldUseMaxCompletionTokensForModel(tt.compat, tt.baseURL, tt.upstreamModel, tt.requestedModel)
 			if got != tt.want {
 				t.Fatalf("ShouldUseMaxCompletionTokensForModel() = %v, want %v", got, tt.want)
 			}

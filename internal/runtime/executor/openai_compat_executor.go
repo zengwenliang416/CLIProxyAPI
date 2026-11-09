@@ -173,7 +173,7 @@ func (e *OpenAICompatExecutor) executeWithCredentials(ctx context.Context, auth 
 		helps.NormalizeOpenAIToolResultsTextOnlyDoc(doc)
 	}
 	if opts.Alt != "responses/compact" {
-		useMCT := helps.ShouldUseMaxCompletionTokensForModel(compat, baseModel, requestedModel)
+		useMCT := helps.ShouldUseMaxCompletionTokensForModel(compat, baseURL, baseModel, requestedModel)
 		helps.NormalizeOpenAIMaxTokensDoc(doc, useMCT)
 		if err = e.applyPromptCacheKeyWithCompatDoc(ctx, auth, compat, from, baseModel, req, opts, doc); err != nil {
 			return resp, err
@@ -417,7 +417,7 @@ func (e *OpenAICompatExecutor) executeStreamWithCredentials(ctx context.Context,
 		helps.NormalizeOpenAIToolResultsTextOnlyDoc(doc)
 	}
 	if opts.Alt != "responses/compact" {
-		useMCT := helps.ShouldUseMaxCompletionTokensForModel(compat, baseModel, requestedModel)
+		useMCT := helps.ShouldUseMaxCompletionTokensForModel(compat, baseURL, baseModel, requestedModel)
 		helps.NormalizeOpenAIMaxTokensDoc(doc, useMCT)
 		if err = e.applyPromptCacheKeyWithCompatDoc(ctx, auth, compat, from, baseModel, req, opts, doc); err != nil {
 			return nil, err

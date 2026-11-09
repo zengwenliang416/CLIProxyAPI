@@ -1146,6 +1146,7 @@ type OpenAICompatibilityModel struct {
 
 	// UseMaxCompletionTokens emits max_completion_tokens instead of legacy max_tokens for this model.
 	// Default false preserves max_tokens for older compatible upstreams.
+	// api.openai.com sends max_completion_tokens for every model without this flag.
 	UseMaxCompletionTokens bool `yaml:"use-max-completion-tokens,omitempty" json:"use-max-completion-tokens,omitempty"`
 
 	// Thinking configures the thinking/reasoning capability for this model.

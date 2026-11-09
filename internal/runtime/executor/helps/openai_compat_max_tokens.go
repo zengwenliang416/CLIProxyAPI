@@ -1,23 +1,47 @@
 package helps
 
 import (
+	"net/url"
 	"strings"
 
 	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
-// ShouldUseMaxCompletionTokensForModel reports whether the resolved model under an
-// OpenAI compatibility configuration has use-max-completion-tokens set to true.
-func ShouldUseMaxCompletionTokensForModel(compat *config.OpenAICompatibility, upstreamModel, requestedModel string) bool {
-	if compat == nil {
+// ShouldUseMaxCompletionTokensForModel reports whether an OpenAI-compatible
+// request should send max_completion_tokens. A model flag wins when it is
+// explicitly enabled. api.openai.com uses max_completion_tokens for every model,
+// so an official channel does not need the flag on each entry. Other upstreams
+// keep max_tokens unless the matched model opts in.
+func ShouldUseMaxCompletionTokensForModel(compat *config.OpenAICompatibility, baseURL, upstreamModel, requestedModel string) bool {
+	useMCT, matched := false, false
+	if compat != nil {
+		if useMCT, matched = openAICompatibilityModelUsesMaxCompletionTokens(compat.Models, upstreamModel); !matched {
+			useMCT, matched = openAICompatibilityModelUsesMaxCompletionTokens(compat.Models, requestedModel)
+		}
+	}
+	if matched && useMCT {
+		return true
+	}
+	if officialOpenAIAPI(baseURL) || (compat != nil && officialOpenAIAPI(compat.BaseURL)) {
+		return true
+	}
+	return false
+}
+
+func officialOpenAIAPI(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return false
 	}
-	if useMCT, matched := openAICompatibilityModelUsesMaxCompletionTokens(compat.Models, upstreamModel); matched {
-		return useMCT
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
 	}
-	useMCT, _ := openAICompatibilityModelUsesMaxCompletionTokens(compat.Models, requestedModel)
-	return useMCT
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), "api.openai.com")
 }
 
 func openAICompatibilityModelUsesMaxCompletionTokens(models []config.OpenAICompatibilityModel, model string) (bool, bool) {
